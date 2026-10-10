@@ -2,27 +2,37 @@
  * エミュレーター用のデモデータ（仙台市内の架空の事業所）。本番では実行しない。
  *   pnpm seed   （firebase emulators:start の起動中に）
  * ログイン：admin@example.com（管理者）/ staff1@example.com（スタッフ）/ operator@example.com（運営者）
- * メールリンクはエミュレーターUI（http://localhost:4000/auth）に表示される。
+ * ログインコードはエミュレーターの関数ログ（http://localhost:4000/logs）に表示される。
+ * デモ用のプロジェクトに入れるとき：SEED_PROJECT=<プロジェクトID> pnpm seed（ID に demo を含むものだけ）
+ * 予定は実行日から SEED_UNTIL（既定 2026-11-30）まで毎日入る（土日も営業）。日ごとに少しずつ変える。
  */
 import {
   addDays,
   type Client,
   type ClientPrivate,
   DEFAULT_TERMS,
+  hhmmToMinutes,
   jstDate,
+  minutesToHhmm,
   type Org,
   type Staff,
   type Visit,
+  weekday,
 } from '@vrp/shared';
 import { initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
 
-if (!process.env.FIRESTORE_EMULATOR_HOST) {
+const target = process.env.SEED_PROJECT;
+if (target && !target.includes('demo')) {
+  console.error('デモデータを入れられるのは、ID に demo を含むプロジェクトだけです（本番に入れないため）');
+  process.exit(1);
+}
+if (!target && !process.env.FIRESTORE_EMULATOR_HOST) {
   process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080';
   process.env.FIREBASE_AUTH_EMULATOR_HOST = '127.0.0.1:9099';
 }
-initializeApp({ projectId: 'demo-visit-route' });
+initializeApp({ projectId: target ?? 'demo-visit-route' });
 const db = getFirestore();
 const auth = getAuth();
 const orgId = 'demo';
@@ -72,8 +82,8 @@ const staff: Record<string, Staff> = {
     gender: 'female',
     home: { address: '仙台市宮城野区榴岡（榴岡小学校）', lat: 38.2593, lng: 140.893 },
     travelMode: 'DRIVE',
-    workDays: [1, 2, 3, 4, 5, 6],
-    shiftStart: '09:00',
+    workDays: [0, 1, 2, 3, 4, 5, 6],
+    shiftStart: '08:00',
     shiftEnd: '18:00',
     active: true,
     uid: null,
@@ -149,10 +159,35 @@ const plan: [string, string, 'fixed' | 'window', string, string, number][] = [
 ];
 const manualRoutes: Record<string, string[]> = { s1: ['v1', 'v2', 'v3'], s2: ['v4', 'v5'], s3: ['v6'] };
 
-for (const date of [jstDate(Date.now()), addDays(jstDate(Date.now()), 1)]) {
+const until = process.env.SEED_UNTIL ?? '2026-11-30';
+const isWeekend = (date: string) => weekday(date) === 0 || weekday(date) === 6;
+/** 土日の手作業案：s3 が1人で回る */
+const routesOf = (date: string): Record<string, string[]> =>
+  isWeekend(date) ? { s3: ['v1', 'v4', 'v6'] } : manualRoutes;
+const shift = (hhmm: string, min: number) => minutesToHhmm(hhmmToMinutes(hhmm) + min);
+const dates: string[] = [];
+for (let d = jstDate(Date.now()); d <= until; d = addDays(d, 1)) dates.push(d);
+
+/**
+ * 日ごとの変化（同じ日なら毎回同じ）：時間に幅のある訪問は 0〜60分ずらす。
+ * 土日は榴岡 さくら（s3）が3件を回る。平日は4日に1回は博物館が休み。
+ */
+function plansOf(date: string, n: number): typeof plan {
+  if (isWeekend(date)) return plan.filter(([id]) => id === 'v1' || id === 'v4' || id === 'v6');
+  return plan
+    .filter(([id]) => !(id === 'v5' && n % 4 === 3))
+    .map(([id, c, kind, e, l, mins]) =>
+      kind === 'window'
+        ? [id, c, kind, shift(e, (n % 3) * 30), shift(l, (n % 3) * 30), mins]
+        : [id, c, kind, e, l, mins],
+    );
+}
+
+for (const [n, date] of dates.entries()) {
   const batch = db.batch();
-  for (const [id, clientId, kind, e, l, mins] of plan) {
-    const staffId = Object.entries(manualRoutes).find(([, ids]) => ids.includes(id))?.[0] ?? null;
+  const today = plansOf(date, n);
+  for (const [id, clientId, kind, e, l, mins] of today) {
+    const staffId = Object.entries(routesOf(date)).find(([, ids]) => ids.includes(id))?.[0] ?? null;
     const v: Visit = {
       date,
       clientId,
@@ -166,8 +201,9 @@ for (const date of [jstDate(Date.now()), addDays(jstDate(Date.now()), 1)]) {
     };
     batch.set(db.doc(`orgs/${orgId}/visits/${date}_${id}`), v);
   }
+  const ids = new Set(today.map(([id]) => id));
   const routes = Object.fromEntries(
-    Object.entries(manualRoutes).map(([s, ids]) => [s, ids.map((id) => `${date}_${id}`)]),
+    Object.entries(routesOf(date)).map(([s, vs]) => [s, vs.filter((id) => ids.has(id)).map((id) => `${date}_${id}`)]),
   );
   batch.set(db.doc(`orgs/${orgId}/manualPlans/${date}`), {
     date,
@@ -198,4 +234,4 @@ for (const [id, s] of Object.entries(staff)) {
   const uid = await user(s.email, { orgId, role: 'staff', staffId: id });
   await db.doc(`orgs/${orgId}/staff/${id}`).update({ uid });
 }
-console.log('デモデータを入れました（事業所 demo、きょうとあしたの予定）');
+console.log(`デモデータを入れました（事業所 demo、${dates[0]}〜${until} の ${dates.length} 日分の予定）`);

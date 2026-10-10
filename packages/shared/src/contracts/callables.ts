@@ -13,6 +13,18 @@ export const inviteMemberRequest = z.object({
 });
 export const inviteMemberResponse = z.object({ uid: z.string() });
 
+/** ログイン：メールに6桁のコードを送る（招待済みのアドレスだけ。結果は送ったかどうかによらず同じ） */
+export const requestLoginCodeRequest = z.object({ email: z.string().trim().toLowerCase().email().max(254) });
+export const requestLoginCodeResponse = z.object({ sent: z.literal(true) });
+/** ログイン：コードを確かめ、ログイン用のトークンを返す */
+export const verifyLoginCodeRequest = z.object({
+  email: z.string().trim().toLowerCase().email().max(254),
+  code: z.string().regex(/^\d{6}$/, '6桁の数字で入力してください'),
+});
+export const signInTokenResponse = z.object({ token: z.string() });
+/** デモ用のログイン（デモの事業所が設定された環境だけ） */
+export const demoSignInRequest = z.object({ as: z.enum(['admin', 'staff']) });
+
 export const geocodeAddressRequest = z.object({ address: z.string().min(1).max(200) });
 export const geocodeAddressResponse = z.object({
   candidates: z.array(z.object({ formattedAddress: z.string(), lat: z.number(), lng: z.number() })),
@@ -57,6 +69,9 @@ export const csvFilesResponse = z.object({
 /** Callable の名前と入出力の対応（web の呼び出しヘルパーが使う） */
 export const CALLABLES = {
   inviteMember: { req: inviteMemberRequest, res: inviteMemberResponse },
+  requestLoginCode: { req: requestLoginCodeRequest, res: requestLoginCodeResponse },
+  verifyLoginCode: { req: verifyLoginCodeRequest, res: signInTokenResponse },
+  demoSignIn: { req: demoSignInRequest, res: signInTokenResponse },
   geocodeAddress: { req: geocodeAddressRequest, res: geocodeAddressResponse },
   createPlanRun: { req: createPlanRunRequest, res: createPlanRunResponse },
   correctAttendance: { req: correctAttendanceRequest, res: attendanceVersionResponse },

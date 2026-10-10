@@ -39,7 +39,7 @@ pnpm smoke    # 通し確認（AI案 → 記録 → 勤怠 → 承認 → CSV）
 ```
 
 ログイン：`admin@example.com`（管理者）／`staff1@example.com`（スタッフ）／`operator@example.com`（運営者）。
-メールリンクはエミュレーター UI（http://127.0.0.1:4000/auth）に出る。
+ログインコード（6桁）はエミュレーターの関数ログ（http://127.0.0.1:4000/logs）に出る。ログイン画面の「デモで試す」（`VITE_DEMO_LOGIN=true`）ならメールなしで入れる。
 
 `pnpm emulators` / `pnpm test:rules` は `scripts/dev/honor-no-proxy.cjs` を読み込む（HTTPS_PROXY がある環境で、firebase-tools が NO_PROXY を無視してローカル宛ての通信をプロキシに送る問題の回避。外部への通信はそのままプロキシを通る）。
 
@@ -61,7 +61,12 @@ pnpm test:rules    # セキュリティルール（エミュレーター）
 - HTTPS_PROXY がある環境では、`firebase deploy` にも `NODE_OPTIONS=--require=$(pwd)/scripts/dev/honor-no-proxy.cjs` を付ける（付けないと関数の読み込みがタイムアウトする）。
 - optimizer のデプロイには `optimizer/venv`（`python -m venv venv` → `venv` の pip で `requirements.txt`）が要る。アップロードからは除外している（firebase.json の `ignore`）。
 
-1. Firebase プロジェクトを作り（Blaze）、Authentication の「メールリンク」を有効にする。リージョンは asia-northeast1。
+1. Firebase プロジェクトを作り（Blaze）、Authentication を有効にする。リージョンは asia-northeast1。
+   ログインはメールの6桁コード（ADR-0007）。メールは拡張機能 Trigger Email（`firebase ext:install firebase/firestore-send-email`、コレクション `mail`、SMTP は事業者のものを設定）で送る。
+   業務関数のサービスアカウントに、自分自身への `roles/iam.serviceAccountTokenCreator` を付ける（ログイン用トークンの署名に使う）。
+   Authentication の「メールリンク」は無効のままにする（使わない）。
+   Firestore の TTL ポリシーを `loginCodes` と `mail` の `expireAt` に設定する（コード・送信済みメールを1日で消す）：
+   `gcloud firestore fields ttls update expireAt --collection-group=loginCodes --enable-ttl`（`mail` も同様）
 2. `firebase use <project>`、Secret Manager に `MAPS_SERVER_KEY`（Routes API・Geocoding API を有効化したサーバー用キー）。
 3. `firebase deploy --only functions:optimizer` → 出てきた URL を `functions/.env.<project>` の `OPTIMIZER_URL` に書く。
    最適化サービスは `invoker="private"`。業務関数のサービスアカウント（既定は `<project-number>-compute@developer.gserviceaccount.com`）に、その Cloud Run サービスの `roles/run.invoker` を付ける。
@@ -69,7 +74,8 @@ pnpm test:rules    # セキュリティルール（エミュレーター）
 4. `web/.env.production.local` に Firebase の Web 設定を書き、`pnpm --filter web build`。
 5. `firebase deploy --only firestore,functions:default,hosting`。
 6. 事業所の開設：`GCLOUD_PROJECT=<project> pnpm org:create -- <orgId> <事業所名> <sitter|care|nursing|other> <管理者メール> [--operator <運営者メール>]`。
-   スタッフは管理者画面で登録して「招待」すると、本人がアプリを開いてログインメールを受け取れる。
+   スタッフは管理者画面で登録して「招待」すると、本人がアプリを開いてログインコードを受け取れる。
+7. デモ環境（画面説明・お試し用）は本番と別のプロジェクト（ID に demo を含む）に作る。`functions/.env.<project>` に `DEMO_ORG_ID=demo`、`web/.env.production.local` に `VITE_DEMO_LOGIN=true`、データは `SEED_PROJECT=<project> pnpm seed`（予定は実行日から `SEED_UNTIL`（既定 2026-11-30）まで毎日入る。土日はスタッフ1人で3件）。地図APIのキーは設定しない（直線距離の概算で動く）。Trigger Email も入れない（デモではコードのログイン・招待は止まる）。
 
 ## 移動時間の比較（分析）
 
