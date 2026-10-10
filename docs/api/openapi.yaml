@@ -1,0 +1,197 @@
+openapi: 3.0.3
+info:
+  title: 訪問ルートAI PoC 最適化サービス API
+  version: 1.0.0
+  description: |
+    最適化サービス（optimizer, Python + OR-Tools）の契約。設計書 docs/design.md §4 optimizer・§5 と対応する。
+    呼び出し元は業務関数（planning）のサービスアカウントだけ（Cloud Run の IAM 認証、外部公開なし）。
+    状態を持たないため、同じ入力なら同じ出力を返す（探索は解の数で打ち切り、単一スレッド・固定シード）。
+    業務関数の Callable（createPlanRun など）の入出力は packages/shared/src/contracts/ の zod スキーマを正とする。
+    エラーは components.schemas.Error の形で返す。列挙値は将来増えることがあり、呼び出し側は未知の値を無視する。
+servers:
+  - url: https://optimizer-<hash>-an.a.run.app
+paths:
+  /v1/plans:solve:
+    post:
+      operationId: SolvePlan
+      summary: 1事業所1日の訪問の割当と順番を求める
+      description: |
+        タイムアウトの目安は30秒。`limits.timeLimitSeconds` に達したら、その時点の最良解を `partial: true` で返す（エラーにしない）。
+        守れない訪問は `unassigned` に原因つきで返す（エラーにしない）。
+        冪等：同じ入力（`requestId` を含む）なら同じ結果。副作用はないので再試行してよい。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SolveRequest" }
+      responses:
+        "200":
+          description: 解けた（全件割当でなくても200）
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SolveResponse" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/version:
+    get:
+      operationId: GetVersion
+      summary: ソルバーの版を返す（planRuns に記録する）
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [solverVersion, ortoolsVersion]
+                properties:
+                  solverVersion: { type: string, example: "0.1.0" }
+                  ortoolsVersion: { type: string, example: "9.11" }
+        default: { $ref: "#/components/responses/Error" }
+components:
+  schemas:
+    SolveRequest:
+      type: object
+      required: [requestId, mode, date, staff, visits, matrix]
+      properties:
+        requestId: { type: string, description: planRuns の runId }
+        mode:
+          type: string
+          enum: [order_only, assign_and_order]
+          description: order_only は各訪問の staffId（現在の割当）を変えない
+        date: { type: string, format: date }
+        staff:
+          type: array
+          minItems: 1
+          maxItems: 30
+          items: { $ref: "#/components/schemas/StaffInput" }
+        visits:
+          type: array
+          maxItems: 200
+          items: { $ref: "#/components/schemas/VisitInput" }
+        matrix: { $ref: "#/components/schemas/TravelMatrix" }
+        weights:
+          type: object
+          description: 目的関数の重み（省略時は既定値）。絶対条件には使わない
+          properties:
+            travelSeconds: { type: number, default: 1 }
+            waitSeconds: { type: number, default: 0.3 }
+            softWindowSeconds: { type: number, default: 2 }
+        limits:
+          type: object
+          properties:
+            timeLimitSeconds: { type: integer, minimum: 1, maximum: 30, default: 20 }
+            solutionLimit: { type: integer, minimum: 1, default: 2000 }
+    StaffInput:
+      type: object
+      required: [staffId, startPoint, endPoint, shiftStart, shiftEnd]
+      properties:
+        staffId: { type: string }
+        gender: { type: string, enum: [female, male, unspecified] }
+        startPoint: { type: integer, description: matrix.points の添字（自宅） }
+        endPoint: { type: integer, description: matrix.points の添字（帰宅先） }
+        shiftStart: { type: string, pattern: "^\\d{2}:\\d{2}$" }
+        shiftEnd: { type: string, pattern: "^\\d{2}:\\d{2}$" }
+        maxVisits: { type: integer, minimum: 0 }
+    VisitInput:
+      type: object
+      required: [visitId, point, durationMinutes, window]
+      properties:
+        visitId: { type: string }
+        point: { type: integer, description: matrix.points の添字 }
+        durationMinutes: { type: integer, minimum: 1 }
+        window:
+          type: object
+          required: [kind, earliestStart, latestStart]
+          properties:
+            kind: { type: string, enum: [fixed, window] }
+            earliestStart: { type: string, pattern: "^\\d{2}:\\d{2}$" }
+            latestStart: { type: string, pattern: "^\\d{2}:\\d{2}$" }
+        currentStaffId: { type: string, description: 手作業案の担当。order_only では必須 }
+        requiredGender: { type: string, enum: [female, male] }
+        ngStaffIds: { type: array, items: { type: string } }
+        minGapBeforeMinutes: { type: integer, minimum: 0, default: 0, description: 前の訪問との余裕 }
+    TravelMatrix:
+      type: object
+      required: [points, seconds, modelVersion]
+      properties:
+        points:
+          type: array
+          items:
+            type: object
+            required: [id]
+            properties:
+              id: { type: string, description: "自宅は staff/{id}、訪問先は clients/{id}" }
+        seconds:
+          type: array
+          description: points × points の予測移動時間（秒）。到達不能は -1
+          items: { type: array, items: { type: integer } }
+        meters:
+          type: array
+          items: { type: array, items: { type: integer } }
+        modelVersion: { type: string, description: travel-time の補正モデル版 }
+    SolveResponse:
+      type: object
+      required: [requestId, routes, unassigned, partial, stats, solverVersion]
+      properties:
+        requestId: { type: string }
+        routes:
+          type: array
+          items:
+            type: object
+            required: [staffId, stops]
+            properties:
+              staffId: { type: string }
+              stops:
+                type: array
+                items:
+                  type: object
+                  required: [visitId, arrival, start, end]
+                  properties:
+                    visitId: { type: string }
+                    arrival: { type: string, pattern: "^\\d{2}:\\d{2}$" }
+                    start: { type: string, pattern: "^\\d{2}:\\d{2}$" }
+                    end: { type: string, pattern: "^\\d{2}:\\d{2}$" }
+                    waitMinutes: { type: integer }
+        unassigned:
+          type: array
+          items:
+            type: object
+            required: [visitId, reasons]
+            properties:
+              visitId: { type: string }
+              reasons:
+                type: array
+                items: { type: string, enum: [time_window, shift, gender, ng_staff, unreachable] }
+        partial: { type: boolean, description: 時間切れで途中の最良解を返した }
+        stats:
+          type: object
+          properties:
+            totalTravelSeconds: { type: integer }
+            totalWaitSeconds: { type: integer }
+            totalMeters: { type: integer }
+            computeMillis: { type: integer }
+        solverVersion: { type: string }
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum: [INVALID_ARGUMENT, UNAUTHENTICATED, PERMISSION_DENIED, UNAVAILABLE, INTERNAL]
+            message: { type: string }
+            details:
+              type: object
+              description: INVALID_ARGUMENT では fields（項目名→理由）
+  responses:
+    Error:
+      description: エラー
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
