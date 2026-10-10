@@ -13,13 +13,8 @@ import { getFirestore } from 'firebase-admin/firestore';
 
 const apply = process.argv.includes('--apply');
 /** seedDemo が作るアカウント（運営者はクレームに事業所が無いので、アドレスで見分ける） */
-const SEED_EMAILS = [
-  'operator@example.com',
-  'admin@example.com',
-  'staff1@example.com',
-  'staff2@example.com',
-  'staff3@example.com',
-];
+const SEED_EMAILS = ['operator@example.com', 'admin@example.com'];
+const isSeedEmail = (email: string) => SEED_EMAILS.includes(email) || /^staff\d+@example\.com$/.test(email);
 if (getApps().length === 0)
   initializeApp({ projectId: process.env.GCLOUD_PROJECT ?? process.env.FIREBASE_PROJECT ?? 'demo-visit-route' });
 const db = getFirestore();
@@ -40,7 +35,7 @@ do {
     const demoUser =
       u.uid.startsWith('demo-') ||
       (typeof orgId === 'string' && demoOrgIds.includes(orgId)) ||
-      SEED_EMAILS.includes(u.email ?? '');
+      isSeedEmail(u.email ?? '');
     if (demoUser) users.push(u);
   }
   pageToken = page.pageToken;

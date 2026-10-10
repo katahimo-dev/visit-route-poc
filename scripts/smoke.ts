@@ -53,11 +53,20 @@ check(m.ai.violations === 0, 'AI案は条件違反なし');
 check(m.ai.travelSeconds <= m.manual.travelSeconds, 'AI案の移動時間は手作業以下');
 await signOut(auth);
 
-// 2. スタッフ：きょうの1件目・2件目を はじめる/おわる（オフライン再送は同じIDで2回書いても1件）
-await signIn('staff1@example.com');
+// 2. スタッフ：きょう2件以上あるスタッフの1件目・2件目を はじめる/おわる（オフライン再送は同じIDで2回書いても1件）
+const todayPlan = (await adminDb().doc(`orgs/demo/manualPlans/${today}`).get()).data();
+const [staffId, route] = (Object.entries(todayPlan?.routes ?? {}) as [string, string[]][]).find(
+  ([, ids]) => ids.length >= 2,
+) ?? ['', []];
+if (!staffId) {
+  console.log('✗ きょう2件以上のスタッフがいません（pnpm seed を先に）');
+  process.exit(1);
+}
+const me = (await adminDb().doc(`orgs/demo/staff/${staffId}`).get()).data();
+await signIn(me?.email);
 const ev = (id: string, type: string, visitId: string, hhmm: string) =>
   setDoc(doc(db, 'orgs/demo/events', id), {
-    staffId: 's1',
+    staffId,
     date: today,
     type,
     visitId,
@@ -67,8 +76,7 @@ const ev = (id: string, type: string, visitId: string, hhmm: string) =>
     lng: null,
     accuracy: null,
   });
-const v1 = `${today}_v1`;
-const v2 = `${today}_v2`;
+const [v1, v2] = route as [string, string];
 await ev('e1', 'arrive', v1, '08:55');
 await ev('e2', 'service_start', v1, '09:00');
 await ev('e3', 'service_end', v1, '10:00');
@@ -82,7 +90,7 @@ await ev('e7', 'service_end', v2, '11:30').catch(() => {
 });
 check(retryFailed, '同じ記録の再送は上書きされない（ルールで拒否＝二重登録なし）');
 await sleep(4000);
-const day = (await adminDb().doc(`orgs/demo/attendanceDays/s1_${today}`).get()).data();
+const day = (await adminDb().doc(`orgs/demo/attendanceDays/${staffId}_${today}`).get()).data();
 check(!!day, '勤怠候補ができた');
 console.log(
   `  実働 ${day?.totals.workMinutes}分 / 移動 ${day?.totals.travelMinutes}分 / 休憩 ${day?.totals.breakMinutes}分 / 拘束 ${day?.totals.boundMinutes}分`,
@@ -90,7 +98,7 @@ console.log(
 check(day?.totals.workMinutes === 105, '実働 105分');
 const legs = await adminDb()
   .collection('orgs/demo/legActuals')
-  .where('staffId', '==', 's1')
+  .where('staffId', '==', staffId)
   .where('date', '==', today)
   .get();
 check(legs.size === 1, '実測区間（予測値つき）が1件保存された');
@@ -103,10 +111,7 @@ const confirmed = await httpsCallable<unknown, { version: number }>(
 )({ date: today, version: day?.version });
 await signOut(auth);
 await signIn('admin@example.com');
-await httpsCallable(
-  fns,
-  'approveAttendance',
-)({ staffId: 's1', date: today, version: confirmed.data.version, orgId: null });
+await httpsCallable(fns, 'approveAttendance')({ staffId, date: today, version: confirmed.data.version, orgId: null });
 const csv = await httpsCallable<unknown, { files: { name: string; csv: string }[] }>(
   fns,
   'exportAttendanceCsv',
@@ -122,7 +127,7 @@ const study = await httpsCallable<unknown, { files: { name: string; csv: string 
 )({ orgId: 'demo', from: today, to: tomorrow });
 const all = study.data.files.map((f) => f.csv).join('\n');
 check(
-  study.data.files.length === 3 && !all.includes('市役所') && !all.includes('s1,'),
+  study.data.files.length === 3 && !all.includes(me?.name) && !all.includes(`${staffId},`),
   '実証データCSVに氏名・元のIDが出ない',
 );
 process.exit(failed ? 1 : 0);

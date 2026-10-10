@@ -118,7 +118,7 @@ flowchart LR
 ### org（事業所・スタッフ・訪問先）
 - 責務：事業所の設定（業種・呼び方・最適化モード `order_only | assign_and_order`・交通費単価・ジオフェンス半径）、スタッフと訪問先のマスタ、ユーザー招待とロール付与、住所→緯度経度の変換と訂正、CSV取込。
 - 持つデータ（持ち主）：事業所設定（`orgs/{orgId}` 本体）、`staff`（氏名・性別・自宅位置・移動手段・勤務曜日と時間・uid）、`clients`（表示名・住所・位置・性別希望・メモ）、`clientPrivate`（NGスタッフ。管理者だけが読む）、`geocodeCache`（住所変換の結果、30日）、`analysisIds`（仮名ID対応表。運営者のみ読める）。業務関数だけが使う最上位のコレクション：`loginCodes`（ログインコードのハッシュ・期限・試行回数）、`mail`（送信待ちのメール。拡張機能 Trigger Email が送る）。スタッフが読めるスタッフ文書は自分の分だけ（ADR-0006）
-- 提供するAPI：`inviteMember`、`geocodeAddress`、`importMasterCsv`（Callable）。マスタの通常の編集は画面から直接（ルールで admin のみ）。トリガー `onStaffUpdated`（休止・付け替えで古いアカウントのクレームを外し、ログインを切る）。ログイン `requestLoginCode`・`verifyLoginCode`（未ログインで呼べる）、スケジュール関数 `revokeInactiveSessions`（毎晩、使っていないアカウントのログインを切る）、デモ環境だけ `demoSignIn`（ADR-0007）。
+- 提供するAPI：`inviteMember`、`geocodeAddress`、`importMasterCsv`（Callable）。マスタの通常の編集は画面から直接（ルールで admin のみ）。トリガー `onStaffUpdated`（休止・付け替えで古いアカウントのクレームを外し、ログインを切る）。ログイン `requestLoginCode`・`verifyLoginCode`（未ログインで呼べる）、スケジュール関数 `revokeInactiveSessions`（毎晩、使っていないアカウントのログインを切る）、デモ環境だけ `demoStaffList`・`demoSignIn`（ADR-0007）。
 - 依存するもの：Firebase Auth（カスタムクレーム）、Google Geocoding API。
 - 配置：`functions/src/modules/org/`、`web/src/features/admin/master/`
 - 完了の条件：
@@ -240,7 +240,8 @@ flowchart LR
 | org | Callable | `geocodeAddress` | 住所→緯度経度（候補を返す。保存は画面） |
 | org | Callable | `requestLoginCode` | 招待済みのメールに6桁のコードを送る（未ログインで呼べる。結果は登録の有無によらず同じ） |
 | org | Callable | `verifyLoginCode` | コードを確かめ、ログイン用のトークンを返す |
-| org | Callable | `demoSignIn` | デモ環境だけ。デモの事業所の管理者・スタッフとしてログイン |
+| org | Callable | `demoStaffList` | デモ環境だけ。ログインする人を選ぶための、デモの事業所のスタッフ（名前とその日の訪問件数） |
+| org | Callable | `demoSignIn` | デモ環境だけ。デモの事業所の管理者・選んだスタッフとしてログイン |
 | org | Callable | `importMasterCsv` | スタッフ・訪問先CSVの取込（dry-run → 適用） |
 | schedule | Callable | `generateDayVisits` | 繰り返し予定から指定日の訪問を作る（冪等） |
 | travel-time | Callable | `trainModel` | 実測から補正モデルの新しい版を作る（operator） |

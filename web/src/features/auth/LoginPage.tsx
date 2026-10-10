@@ -1,5 +1,6 @@
+import { jstDate } from '@vrp/shared';
 import { signInWithCustomToken } from 'firebase/auth';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { call, messageOf } from '../../lib/api';
 import { auth } from '../../lib/firebase';
 
@@ -58,12 +59,6 @@ export function LoginPage() {
       sessionStorage.removeItem(STEP_KEY);
     });
 
-  const demo = (as: 'admin' | 'staff') =>
-    run(async () => {
-      const { token } = await call('demoSignIn', { as });
-      await signIn(token);
-    });
-
   return (
     <div className="staff-shell stack" style={{ paddingTop: 48 }}>
       <h1>訪問ルート</h1>
@@ -110,16 +105,50 @@ export function LoginPage() {
         )}
         {error && <p className="error">{error}</p>}
       </div>
-      {DEMO && (
-        <div className="card stack">
-          <h2>デモで試す</h2>
-          <p className="sub">架空の事業所のデータで、メールなしで画面を試せます。</p>
-          <button type="button" className="btn" disabled={busy} onClick={() => demo('staff')}>
-            スタッフとして試す
-          </button>
-          <button type="button" className="btn" disabled={busy} onClick={() => demo('admin')}>
-            管理者として試す
-          </button>
+      {DEMO && <DemoLogin busy={busy} run={run} />}
+    </div>
+  );
+}
+
+type DemoStaff = { id: string; name: string; visits: number };
+
+/** デモで試す：管理者か、選んだスタッフとしてメールなしで入る（デモの事業所だけ。ADR-0007） */
+function DemoLogin({ busy, run }: { busy: boolean; run: (fn: () => Promise<void>) => Promise<void> }) {
+  const [staff, setStaff] = useState<DemoStaff[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    call('demoStaffList', { date: jstDate(Date.now()) })
+      .then((r) => setStaff(r.staff))
+      .catch((e) => setLoadError(messageOf(e)));
+  }, []);
+
+  const enter = (as: 'admin' | 'staff', staffId: string | null = null) =>
+    run(async () => {
+      const { token } = await call('demoSignIn', { as, staffId });
+      await signIn(token);
+    });
+
+  return (
+    <div className="card stack">
+      <h2>デモで試す</h2>
+      <p className="sub">架空の事業所のデータで、メールなしで画面を試せます。</p>
+      <button type="button" className="btn" disabled={busy} onClick={() => enter('admin')}>
+        管理者として試す（PC向け）
+      </button>
+      <strong>スタッフとして試す（スマホ向け）</strong>
+      {loadError ? (
+        <p className="error">{loadError}</p>
+      ) : staff === null ? (
+        <p className="sub">読み込み中…</p>
+      ) : (
+        <div className="demo-staff">
+          {staff.map((s) => (
+            <button key={s.id} type="button" className="btn" disabled={busy} onClick={() => enter('staff', s.id)}>
+              <span>{s.name}</span>
+              <span className="sub">{s.visits > 0 ? `きょう ${s.visits}件` : 'きょうは休み'}</span>
+            </button>
+          ))}
         </div>
       )}
     </div>
