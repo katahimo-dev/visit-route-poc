@@ -4,16 +4,20 @@
  * ログイン：admin@example.com（管理者）/ staff1@example.com（スタッフ）/ operator@example.com（運営者）
  * ログインコードはエミュレーターの関数ログ（http://localhost:4000/logs）に表示される。
  * デモ用のプロジェクトに入れるとき：SEED_PROJECT=<プロジェクトID> pnpm seed（ID に demo を含むものだけ）
+ * 予定は実行日から SEED_UNTIL（既定 2026-11-30）までの平日と土曜に入る。日ごとに少しずつ変える。
  */
 import {
   addDays,
   type Client,
   type ClientPrivate,
   DEFAULT_TERMS,
+  hhmmToMinutes,
   jstDate,
+  minutesToHhmm,
   type Org,
   type Staff,
   type Visit,
+  weekday,
 } from '@vrp/shared';
 import { initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
@@ -155,9 +159,30 @@ const plan: [string, string, 'fixed' | 'window', string, string, number][] = [
 ];
 const manualRoutes: Record<string, string[]> = { s1: ['v1', 'v2', 'v3'], s2: ['v4', 'v5'], s3: ['v6'] };
 
-for (const date of [jstDate(Date.now()), addDays(jstDate(Date.now()), 1)]) {
+const until = process.env.SEED_UNTIL ?? '2026-11-30';
+const shift = (hhmm: string, min: number) => minutesToHhmm(hhmmToMinutes(hhmm) + min);
+const dates: string[] = [];
+for (let d = jstDate(Date.now()); d <= until; d = addDays(d, 1)) if (weekday(d) !== 0) dates.push(d);
+
+/**
+ * 日ごとの変化（同じ日なら毎回同じ）：時間に幅のある訪問は 0〜60分ずらす。
+ * 土曜は科学館（s3 の勤務日）と図書館だけ。4日に1回は博物館が休み。
+ */
+function plansOf(date: string, n: number): typeof plan {
+  if (weekday(date) === 6) return plan.filter(([id]) => id === 'v1' || id === 'v6');
+  return plan
+    .filter(([id]) => !(id === 'v5' && n % 4 === 3))
+    .map(([id, c, kind, e, l, mins]) =>
+      kind === 'window'
+        ? [id, c, kind, shift(e, (n % 3) * 30), shift(l, (n % 3) * 30), mins]
+        : [id, c, kind, e, l, mins],
+    );
+}
+
+for (const [n, date] of dates.entries()) {
   const batch = db.batch();
-  for (const [id, clientId, kind, e, l, mins] of plan) {
+  const today = plansOf(date, n);
+  for (const [id, clientId, kind, e, l, mins] of today) {
     const staffId = Object.entries(manualRoutes).find(([, ids]) => ids.includes(id))?.[0] ?? null;
     const v: Visit = {
       date,
@@ -172,8 +197,9 @@ for (const date of [jstDate(Date.now()), addDays(jstDate(Date.now()), 1)]) {
     };
     batch.set(db.doc(`orgs/${orgId}/visits/${date}_${id}`), v);
   }
+  const ids = new Set(today.map(([id]) => id));
   const routes = Object.fromEntries(
-    Object.entries(manualRoutes).map(([s, ids]) => [s, ids.map((id) => `${date}_${id}`)]),
+    Object.entries(manualRoutes).map(([s, vs]) => [s, vs.filter((id) => ids.has(id)).map((id) => `${date}_${id}`)]),
   );
   batch.set(db.doc(`orgs/${orgId}/manualPlans/${date}`), {
     date,
@@ -204,4 +230,4 @@ for (const [id, s] of Object.entries(staff)) {
   const uid = await user(s.email, { orgId, role: 'staff', staffId: id });
   await db.doc(`orgs/${orgId}/staff/${id}`).update({ uid });
 }
-console.log('デモデータを入れました（事業所 demo、きょうとあしたの予定）');
+console.log(`デモデータを入れました（事業所 demo、${dates[0]}〜${until} の ${dates.length} 日分の予定）`);

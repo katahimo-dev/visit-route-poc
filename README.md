@@ -69,7 +69,7 @@ pnpm test:rules    # セキュリティルール（エミュレーター）
 5. `firebase deploy --only firestore,functions:default,hosting`。
 6. 事業所の開設：`GCLOUD_PROJECT=<project> pnpm org:create -- <orgId> <事業所名> <sitter|care|nursing|other> <管理者メール> [--operator <運営者メール>]`。
    スタッフは管理者画面で登録して「招待」すると、本人がアプリを開いてログインコードを受け取れる。
-7. デモ環境（画面説明・お試し用）は本番と別のプロジェクト（ID に demo を含む）に作る。`functions/.env.<project>` に `DEMO_ORG_ID=demo`、`web/.env.production.local` に `VITE_DEMO_LOGIN=true`、データは `SEED_PROJECT=<project> pnpm seed`（予定は実行日のきょう・あしたに入るので、見せる日の朝に入れ直す）。地図APIのキーは設定しない（直線距離の概算で動く）。Trigger Email も入れない（デモではコードのログイン・招待は止まる）。
+7. デモ環境（画面説明・お試し用）は本番と別のプロジェクト（ID に demo を含む）に作る。`functions/.env.<project>` に `DEMO_ORG_ID=demo`、`web/.env.production.local` に `VITE_DEMO_LOGIN=true`、データは `SEED_PROJECT=<project> pnpm seed`（予定は実行日から `SEED_UNTIL`（既定 2026-11-30）までの平日・土曜に入る。日曜は休み）。地図APIのキーは設定しない（直線距離の概算で動く）。Trigger Email も入れない（デモではコードのログイン・招待は止まる）。
 
 ## 移動時間の比較（分析）
 
