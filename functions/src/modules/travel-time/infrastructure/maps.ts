@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto';
-import type { LatLng, TravelMode } from '@vrp/shared';
+import { hhmmToMinutes, jstHhmm, type LatLng, type TravelMode } from '@vrp/shared';
 import { defineSecret } from 'firebase-functions/params';
 import { logger } from 'firebase-functions/v2';
 import { col } from '../../../lib/context';
-import { fallbackLeg } from '../domain/predict';
+import { fallbackLeg, type TimeBand, timeBandOf } from '../domain/predict';
+import { estimateScale, groupByOrigin, neighborPairs } from '../domain/sparse';
 
 /** サーバー用の Maps API キー（Secret Manager）。未設定なら概算に切り替える */
 export const MAPS_SERVER_KEY = defineSecret('MAPS_SERVER_KEY');
@@ -19,19 +20,31 @@ function mapsKey(): string | null {
   }
 }
 
-export type BaseLeg = { seconds: number; meters: number; source: 'routes_api' | 'fallback' };
+export type BaseLeg = {
+  seconds: number;
+  meters: number;
+  /** routes_api：実測（キャッシュ含む）、estimate：近傍外の概算、fallback：地図APIが使えず概算 */
+  source: 'routes_api' | 'estimate' | 'fallback';
+};
+
+type CachedLeg = { seconds: number; meters: number; fetchedAt: number } | { noRoute: true; fetchedAt: number };
 
 const round = (n: number) => n.toFixed(5);
-function legHash(a: LatLng, b: LatLng, mode: TravelMode, departHour: number): string {
+function legHash(a: LatLng, b: LatLng, mode: TravelMode, band: TimeBand): string {
   return createHash('sha256')
-    .update(`${round(a.lat)},${round(a.lng)}|${round(b.lat)},${round(b.lng)}|${mode}|${departHour}`)
+    .update(`${round(a.lat)},${round(a.lng)}|${round(b.lat)},${round(b.lng)}|${mode}|${band}`)
     .digest('hex')
     .slice(0, 32);
 }
 
+/** 地図APIへの同時リクエスト数 */
+const CONCURRENCY = 4;
+
 /**
- * 地点 × 地点の基準移動時間。キャッシュ（legCache, 30日）→ Routes API の順に引く。
- * departHour は「何時台に出発するか」（交通の混み具合を反映させるため、実際の出発日時の目安に使う）。
+ * 地点 × 地点の基準移動時間（ADR-0004）。
+ * 近傍の区間（neighborPairs）だけをキャッシュ（legCache, 30日）→ Routes API の順に引き、
+ * 残りの区間は直線距離の概算を、同じ行列の実測から求めた倍率で補正して埋める。
+ * キャッシュの時間区分は時間帯（朝・日中・夕方。日本時間）で、補正モデルの区分と同じ。
  */
 export async function baseMatrix(
   orgId: string,
@@ -39,101 +52,129 @@ export async function baseMatrix(
   mode: TravelMode,
   departAtMs: number,
 ): Promise<BaseLeg[][]> {
-  const hour = new Date(departAtMs).getUTCHours();
-  const n = points.length;
+  const band = timeBandOf(hhmmToMinutes(jstHhmm(departAtMs)));
   const out: (BaseLeg | null)[][] = points.map((_, i) =>
-    points.map((__, j) => (i === j ? { seconds: 0, meters: 0, source: 'fallback' as const } : null)),
+    points.map((__, j) => (i === j ? { seconds: 0, meters: 0, source: 'routes_api' as const } : null)),
   );
   const key = mapsKey();
-  if (!key) {
-    for (let i = 0; i < n; i++)
-      for (let j = 0; j < n; j++)
-        if (!out[i]![j]) out[i]![j] = { ...fallbackLeg(points[i]!, points[j]!, mode), source: 'fallback' };
-    return out as BaseLeg[][];
-  }
-  // キャッシュ
+  if (!key) return fillEstimates(out, points, mode, 'fallback');
+
+  const pairs = neighborPairs(points);
   const cache = col(orgId, 'legCache');
-  const missing: [number, number][] = [];
-  const hashes: string[][] = points.map((a, i) => points.map((b, j) => (i === j ? '' : legHash(a, b, mode, hour))));
-  const refs: { i: number; j: number; ref: FirebaseFirestore.DocumentReference }[] = [];
-  for (let i = 0; i < n; i++)
-    for (let j = 0; j < n; j++) if (i !== j) refs.push({ i, j, ref: cache.doc(hashes[i]![j]!) });
-  const snaps = refs.length ? await cache.firestore.getAll(...refs.map((r) => r.ref)) : [];
+  const hashOf = ([i, j]: [number, number]) => legHash(points[i]!, points[j]!, mode, band);
+  const snaps = pairs.length ? await cache.firestore.getAll(...pairs.map((p) => cache.doc(hashOf(p)))) : [];
   const now = Date.now();
+  const missing: [number, number][] = [];
   snaps.forEach((s, k) => {
-    const { i, j } = refs[k]!;
-    const d = s.data() as { seconds: number; meters: number; fetchedAt: number } | undefined;
-    if (d && now - d.fetchedAt < CACHE_DAYS * 86400000)
-      out[i]![j] = { seconds: d.seconds, meters: d.meters, source: 'routes_api' };
-    else missing.push([i, j]);
+    const [i, j] = pairs[k]!;
+    const d = s.data() as CachedLeg | undefined;
+    if (!d || now - d.fetchedAt >= CACHE_DAYS * 86400000) missing.push([i, j]);
+    else if ('noRoute' in d) out[i]![j] = { ...fallbackLeg(points[i]!, points[j]!, mode), source: 'fallback' };
+    else out[i]![j] = { seconds: d.seconds, meters: d.meters, source: 'routes_api' };
   });
-  if (missing.length) {
-    const fetched = await fetchRouteMatrix(key, points, mode, departAtMs).catch((e: unknown) => {
-      logger.warn('travel_time.routes_api_failed', { reason: e instanceof Error ? e.name : 'unknown' });
-      return null;
-    });
-    const batch = cache.firestore.batch();
-    for (const [i, j] of missing) {
-      const f = fetched?.[i]?.[j];
-      if (f) {
-        out[i]![j] = { ...f, source: 'routes_api' };
-        batch.set(cache.doc(hashes[i]![j]!), { ...f, fetchedAt: now });
-      } else {
-        out[i]![j] = { ...fallbackLeg(points[i]!, points[j]!, mode), source: 'fallback' };
-      }
-    }
-    if (fetched) await batch.commit();
+
+  // 出発地ごとに、足りない到着地だけを聞く。成功したリクエストの分はすぐキャッシュに書く
+  // （途中で失敗・タイムアウトしても、課金済みの結果を捨てない）
+  const groups = groupByOrigin(missing);
+  let failed = 0;
+  for (let g = 0; g < groups.length; g += CONCURRENCY) {
+    await Promise.all(
+      groups.slice(g, g + CONCURRENCY).map(async ({ origin, destinations }) => {
+        const fetched = await fetchRow(
+          key,
+          points[origin]!,
+          destinations.map((j) => points[j]!),
+          mode,
+          departAtMs,
+        ).catch((e: unknown) => {
+          failed++;
+          logger.warn('travel_time.routes_api_failed', { reason: e instanceof Error ? e.message : 'unknown' });
+          return null;
+        });
+        if (!fetched) return;
+        const batch = cache.firestore.batch();
+        destinations.forEach((j, k) => {
+          const f = fetched[k];
+          if (f) out[origin]![j] = { ...f, source: 'routes_api' };
+          // ルートなしも覚えておき、毎回聞き直さない
+          batch.set(cache.doc(hashOf([origin, j])), f ? { ...f, fetchedAt: now } : { noRoute: true, fetchedAt: now });
+        });
+        await batch.commit();
+      }),
+    );
   }
-  return out as BaseLeg[][];
+  if (failed) logger.warn('travel_time.routes_api_partial', { failedRequests: failed, requests: groups.length });
+
+  // 失敗・ルートなしの近傍区間は fallback、近傍外は estimate で埋める
+  for (const [i, j] of pairs)
+    if (!out[i]![j]) out[i]![j] = { ...fallbackLeg(points[i]!, points[j]!, mode), source: 'fallback' };
+  return fillEstimates(out, points, mode, 'estimate');
 }
 
-/** Routes API computeRouteMatrix（1回あたり最大625要素。超える分は分割） */
-async function fetchRouteMatrix(
-  key: string,
+/** 空いている区間を、直線距離の概算 × 実測から求めた倍率で埋める */
+function fillEstimates(
+  out: (BaseLeg | null)[][],
   points: LatLng[],
   mode: TravelMode,
+  source: 'estimate' | 'fallback',
+): BaseLeg[][] {
+  const samples: { actual: number; estimate: number }[] = [];
+  for (let i = 0; i < out.length; i++)
+    for (let j = 0; j < out.length; j++) {
+      const l = out[i]![j];
+      if (l?.source === 'routes_api' && i !== j)
+        samples.push({ actual: l.seconds, estimate: fallbackLeg(points[i]!, points[j]!, mode).seconds });
+    }
+  const scale = estimateScale(samples);
+  return out.map((row, i) =>
+    row.map((l, j) => {
+      if (l) return l;
+      const e = fallbackLeg(points[i]!, points[j]!, mode);
+      return { seconds: Math.round(e.seconds * scale), meters: Math.round(e.meters * scale), source };
+    }),
+  );
+}
+
+/** Routes API computeRouteMatrix（出発地1つ × 到着地の一覧）。ルートが無い到着地は null */
+async function fetchRow(
+  key: string,
+  origin: LatLng,
+  destinations: LatLng[],
+  mode: TravelMode,
   departAtMs: number,
-): Promise<({ seconds: number; meters: number } | null)[][]> {
-  const n = points.length;
-  const out: ({ seconds: number; meters: number } | null)[][] = points.map(() => points.map(() => null));
+): Promise<({ seconds: number; meters: number } | null)[]> {
+  const out: ({ seconds: number; meters: number } | null)[] = destinations.map(() => null);
   const wp = (p: LatLng) => ({ waypoint: { location: { latLng: { latitude: p.lat, longitude: p.lng } } } });
-  const chunk = Math.max(1, Math.floor(625 / n));
-  for (let o = 0; o < n; o += chunk) {
-    const origins = points.slice(o, o + chunk);
-    const body: Record<string, unknown> = {
-      origins: origins.map(wp),
-      destinations: points.map(wp),
-      travelMode: mode,
-    };
-    if (mode === 'DRIVE') {
-      body.routingPreference = 'TRAFFIC_AWARE';
-      // 過去の日時は指定できないので、未来のときだけ渡す
-      if (departAtMs > Date.now()) body.departureTime = new Date(departAtMs).toISOString();
-    }
-    const res = await fetch('https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Goog-Api-Key': key,
-        'X-Goog-FieldMask': 'originIndex,destinationIndex,duration,distanceMeters,condition',
-      },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(10000),
-    });
-    if (!res.ok) throw new Error(`routes_api_${res.status}`);
-    const rows = (await res.json()) as {
-      originIndex?: number;
-      destinationIndex?: number;
-      duration?: string;
-      distanceMeters?: number;
-      condition?: string;
-    }[];
-    for (const r of rows) {
-      if (r.condition !== 'ROUTE_EXISTS') continue;
-      const i = o + (r.originIndex ?? 0);
-      const j = r.destinationIndex ?? 0;
-      out[i]![j] = { seconds: Number.parseInt(r.duration ?? '0', 10), meters: r.distanceMeters ?? 0 };
-    }
+  const body: Record<string, unknown> = {
+    origins: [wp(origin)],
+    destinations: destinations.map(wp),
+    travelMode: mode,
+  };
+  if (mode === 'DRIVE') {
+    body.routingPreference = 'TRAFFIC_AWARE';
+    // 過去の日時は指定できないので、未来のときだけ渡す
+    if (departAtMs > Date.now()) body.departureTime = new Date(departAtMs).toISOString();
+  }
+  const res = await fetch('https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Goog-Api-Key': key,
+      'X-Goog-FieldMask': 'originIndex,destinationIndex,duration,distanceMeters,condition',
+    },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!res.ok) throw new Error(`routes_api_${res.status}`);
+  const rows = (await res.json()) as {
+    destinationIndex?: number;
+    duration?: string;
+    distanceMeters?: number;
+    condition?: string;
+  }[];
+  for (const r of rows) {
+    if (r.condition !== 'ROUTE_EXISTS') continue;
+    out[r.destinationIndex ?? 0] = { seconds: Number.parseInt(r.duration ?? '0', 10), meters: r.distanceMeters ?? 0 };
   }
   return out;
 }
