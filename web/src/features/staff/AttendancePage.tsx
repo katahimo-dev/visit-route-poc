@@ -1,4 +1,5 @@
 import { type AttendanceDay, type AttendanceVisit, type Client, jstHhmm, jstToMs, type Visit } from '@vrp/shared';
+import { where } from 'firebase/firestore';
 import { useState } from 'react';
 import { useToast } from '../../components/Toast';
 import { call, messageOf } from '../../lib/api';
@@ -24,7 +25,8 @@ export function AttendancePage({ date }: { date: string }) {
   const s = useSession();
   const toast = useToast();
   const day = useOrgDoc<AttendanceDay>(s.orgId, 'attendanceDays', s.staffId ? `${s.staffId}_${date}` : null);
-  const { rows: visits } = useOrgCollection<Visit>(s.orgId, 'visits');
+  // 当日の訪問だけを購読する（全期間を読むと日数に比例して読み取りが増える）
+  const { rows: visits } = useOrgCollection<Visit>(s.orgId, 'visits', [where('date', '==', date)], date);
   const { rows: clients } = useOrgCollection<Client>(s.orgId, 'clients');
   const [busy, setBusy] = useState(false);
 

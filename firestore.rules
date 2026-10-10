@@ -9,7 +9,15 @@ service cloud.firestore {
     function isAdmin(orgId) { return inOrg(orgId) && request.auth.token.role == 'admin'; }
     function isStaff(orgId) { return inOrg(orgId) && request.auth.token.role == 'staff'; }
     function myStaffId() { return request.auth.token.staffId; }
-    function canRead(orgId) { return inOrg(orgId) || isOperator(); }
+    // クレームだけでなく、スタッフ文書が「在籍中」で「この uid に紐づいている」ことも見る。
+    // 退職（active=false）や別の人への付け替えをしたら、古いトークンでもその場で読み書きできなくする
+    function myStaff(orgId) { return get(/databases/$(database)/documents/orgs/$(orgId)/staff/$(myStaffId())).data; }
+    function isActiveStaff(orgId) {
+      return isStaff(orgId) && myStaffId() is string
+        && myStaff(orgId).get('active', false) == true
+        && myStaff(orgId).get('uid', null) == request.auth.uid;
+    }
+    function canRead(orgId) { return isAdmin(orgId) || isOperator() || isActiveStaff(orgId); }
     function canManage(orgId) { return isAdmin(orgId) || isOperator(); }
 
     function isDate(v) { return v is string && v.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$'); }
@@ -21,8 +29,9 @@ service cloud.firestore {
       allow write: if isOperator();
 
       // マスタ・予定・手作業案：管理者が編集、事業所のメンバーが読む
+      // 同僚の自宅・メールは見せない。スタッフが読めるのは自分の文書だけ
       match /staff/{staffId} {
-        allow read: if canRead(orgId);
+        allow read: if canManage(orgId) || (isStaff(orgId) && staffId == myStaffId() && resource.data.get('uid', null) == request.auth.uid);
         allow create, update: if canManage(orgId)
           && request.resource.data.keys().hasAll(['name', 'email', 'gender', 'home', 'travelMode', 'workDays', 'shiftStart', 'shiftEnd', 'active'])
           && request.resource.data.name is string && request.resource.data.name.size() <= 50
@@ -34,8 +43,18 @@ service cloud.firestore {
       }
       match /clients/{clientId} {
         allow read: if canRead(orgId);
+        // NG スタッフはスタッフに見せないので clientPrivate に置く（ここには書かせない）
         allow create, update: if canManage(orgId)
-          && request.resource.data.displayName is string && request.resource.data.displayName.size() <= 50;
+          && request.resource.data.displayName is string && request.resource.data.displayName.size() <= 50
+          && !('ngStaffIds' in request.resource.data);
+        allow delete: if false;
+      }
+      // 訪問先の管理者だけの情報（NG スタッフ）
+      match /clientPrivate/{clientId} {
+        allow read: if canManage(orgId);
+        allow create, update: if canManage(orgId)
+          && request.resource.data.keys().hasOnly(['ngStaffIds'])
+          && request.resource.data.ngStaffIds is list && request.resource.data.ngStaffIds.size() <= 50;
         allow delete: if false;
       }
       match /visits/{visitId} {
@@ -53,10 +72,13 @@ service cloud.firestore {
 
       // スタッフの記録：本人だけが作成。更新・削除はできない（再送は同じ文書の作成＝冪等）
       match /events/{eventId} {
-        allow read: if canManage(orgId) || (isStaff(orgId) && resource.data.staffId == myStaffId());
-        allow create: if isStaff(orgId)
+        allow read: if canManage(orgId) || (isActiveStaff(orgId) && resource.data.staffId == myStaffId());
+        allow create: if isActiveStaff(orgId)
           && request.resource.data.staffId == myStaffId()
           && isDate(request.resource.data.date)
+          // 端末の時刻は「7日前〜10分先」だけ受け付ける（オフラインの再送は通し、日時をずらした大量作成を防ぐ）
+          && request.resource.data.clientTime > request.time.toMillis() - 7 * 86400000
+          && request.resource.data.clientTime < request.time.toMillis() + 600000
           && request.resource.data.type in ['shift_start', 'shift_end', 'client_open', 'client_close', 'route_open', 'route_close', 'arrive', 'depart', 'service_start', 'service_end']
           && request.resource.data.source in ['geofence', 'button', 'filled']
           && request.resource.data.clientTime is number
@@ -69,7 +91,7 @@ service cloud.firestore {
       match /locationSamples/{sampleId} {
         // 生の位置は運営者だけが読む（分析用）。管理者にも見せない
         allow read: if isOperator();
-        allow create: if isStaff(orgId)
+        allow create: if isActiveStaff(orgId)
           && request.resource.data.staffId == myStaffId()
           && isDate(request.resource.data.date)
           && request.resource.data.lat is number && request.resource.data.lng is number;
@@ -78,7 +100,7 @@ service cloud.firestore {
 
       // 業務関数だけが書くもの
       match /attendanceDays/{id} {
-        allow read: if canManage(orgId) || (isStaff(orgId) && resource.data.staffId == myStaffId());
+        allow read: if canManage(orgId) || (isActiveStaff(orgId) && resource.data.staffId == myStaffId());
         allow write: if false;
       }
       match /planRuns/{runId} {

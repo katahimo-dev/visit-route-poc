@@ -1,4 +1,4 @@
-import type { Client, Org, Staff, Visit } from '@vrp/shared';
+import type { Client, ClientPrivate, Org, Staff, Visit } from '@vrp/shared';
 import { describe, expect, it } from 'vitest';
 import { prepare } from './buildSolve';
 
@@ -24,7 +24,7 @@ const staff = (id: string, lat: number | null, workDays = [1]): Staff & { id: st
   active: true,
   uid: null,
 });
-const client = (lat: number | null, extra: Partial<Client> = {}): Client => ({
+const client = (lat: number | null, extra: Partial<Client & ClientPrivate> = {}): Client & ClientPrivate => ({
   displayName: 'x',
   place: { address: '', lat, lng: lat === null ? null : 140.9 },
   requiredGender: null,

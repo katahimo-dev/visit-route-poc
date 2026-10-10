@@ -1,4 +1,14 @@
-import type { Client, EvalMatrix, EvalStaff, EvalVisit, Org, SolveRequest, Staff, Visit } from '@vrp/shared';
+import type {
+  Client,
+  ClientPrivate,
+  EvalMatrix,
+  EvalStaff,
+  EvalVisit,
+  Org,
+  SolveRequest,
+  Staff,
+  Visit,
+} from '@vrp/shared';
 
 /**
  * その日の訪問・スタッフから、最適化の入力と、計画値比較に使う評価用データを作る（純粋関数）。
@@ -8,7 +18,8 @@ import type { Client, EvalMatrix, EvalStaff, EvalVisit, Org, SolveRequest, Staff
 export type Entities = {
   org: Org;
   staff: (Staff & { id: string })[];
-  clients: Map<string, Client>;
+  /** 訪問先と、管理者だけの情報（NG スタッフ）を合わせたもの */
+  clients: Map<string, Client & ClientPrivate>;
   visits: (Visit & { id: string })[];
   /** 手作業案（スタッフ → 訪問IDの順番） */
   manualRoutes: Record<string, string[]>;
