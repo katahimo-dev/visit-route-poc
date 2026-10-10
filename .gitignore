@@ -1,0 +1,17 @@
+node_modules/
+dist/
+lib/
+.venv/
+__pycache__/
+*.log
+.firebase/
+firebase-debug*.log
+firestore-debug.log
+ui-debug.log
+.env
+.env.local
+optimizer/venv/
+.secret.local
+.env.*.local
+*-debug.log
+web/dev-dist/

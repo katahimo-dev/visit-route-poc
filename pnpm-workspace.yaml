@@ -1,0 +1,12 @@
+packages:
+  - packages/*
+  - functions
+  - web
+engineStrict: true
+
+# 依存パッケージの postinstall は既定でブロックされる。許可/不要を明示する
+allowBuilds:
+  '@biomejs/biome': true
+  esbuild: false
+  protobufjs: false
+  '@firebase/util': false

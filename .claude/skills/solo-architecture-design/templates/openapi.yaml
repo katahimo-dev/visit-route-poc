@@ -1,0 +1,86 @@
+openapi: 3.0.3
+info:
+  title: <システム名> API
+  version: 1.0.0
+  description: |
+    API契約。設計書 docs/design.md の「5. API契約」と対応させる。
+    エラーは components.schemas.Error の形で返す。
+paths:
+  /things:
+    get:
+      operationId: ListThings
+      summary: 一覧を取得する
+      parameters:
+        - { name: page_size, in: query, schema: { type: integer, minimum: 1, maximum: 100 } }
+        - { name: page_token, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  things: { type: array, items: { $ref: "#/components/schemas/Thing" } }
+                  next_page_token: { type: string }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: CreateThing
+      summary: 作成する
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string }, description: 同じキーなら同じ結果を返す }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Thing" }
+      responses:
+        "201":
+          description: 作成した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Thing" }
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /things/{thing_id}:
+    parameters:
+      - { name: thing_id, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: GetThing
+      summary: 1件取得する
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Thing" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+components:
+  schemas:
+    Thing:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, description: "一意な名前。形式 things/{thing_id}", readOnly: true }
+        title: { type: string }
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum: [INVALID_ARGUMENT, UNAUTHENTICATED, PERMISSION_DENIED, NOT_FOUND, ALREADY_EXISTS, FAILED_PRECONDITION, RESOURCE_EXHAUSTED, UNAVAILABLE, INTERNAL]
+            message: { type: string }
+            details: { type: object }
+  responses:
+    Error:
+      description: エラー（業務の言葉で返す。内部の例外を含めない）
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }

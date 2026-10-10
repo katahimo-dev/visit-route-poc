@@ -1,0 +1,155 @@
+openapi: 3.0.3
+info:
+  title: 書店システム API（記入例・抜粋）
+  version: 1.0.0
+paths:
+  /books:search:
+    get:
+      operationId: SearchBooks
+      summary: タイトル・著者で本を検索する
+      parameters:
+        - { name: q, in: query, required: true, schema: { type: string } }
+        - { name: page_size, in: query, schema: { type: integer, maximum: 100 } }
+        - { name: page_token, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  books: { type: array, items: { $ref: "#/components/schemas/Book" } }
+                  next_page_token: { type: string }
+        default: { $ref: "#/components/responses/Error" }
+  /publishers/{publisher_id}/books:
+    parameters:
+      - { name: publisher_id, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: CreateBook
+      summary: 本を登録する
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Book" }
+      responses:
+        "201":
+          description: 登録した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Book" }
+        "400": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /publishers/{publisher_id}/books/{book_id}:
+    parameters:
+      - { name: publisher_id, in: path, required: true, schema: { type: string } }
+      - { name: book_id, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: GetBook
+      summary: 本を1冊取得する
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Book" }
+        "404": { $ref: "#/components/responses/Error" }
+  /publishers/{publisher_id}/books/{book_id}:archive:
+    parameters:
+      - { name: publisher_id, in: path, required: true, schema: { type: string } }
+      - { name: book_id, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: ArchiveBook
+      summary: 本を販売終了にする
+      responses:
+        "200":
+          description: 販売終了にした
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Book" }
+        default: { $ref: "#/components/responses/Error" }
+  /users/{user_id}/orders:
+    parameters:
+      - { name: user_id, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: ListOrders
+      summary: 注文履歴を取得する
+      parameters:
+        - { name: page_size, in: query, schema: { type: integer, maximum: 50 } }
+        - { name: page_token, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  orders: { type: array, items: { $ref: "#/components/schemas/Order" } }
+                  next_page_token: { type: string }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: CreateOrder
+      summary: 注文を作成し、在庫引当て・決済まで行う
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Order" }
+      responses:
+        "201":
+          description: 注文が確定した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Order" }
+        "402": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+components:
+  schemas:
+    Book:
+      type: object
+      required: [title]
+      properties:
+        name: { type: string, readOnly: true, description: "publishers/{p}/books/{b}" }
+        title: { type: string }
+        authors: { type: array, items: { type: string } }
+        price: { type: integer, description: 税込価格（円） }
+        state: { type: string, enum: [ON_SALE, ARCHIVED], readOnly: true }
+    Order:
+      type: object
+      required: [items]
+      properties:
+        name: { type: string, readOnly: true, description: "users/{u}/orders/{o}" }
+        items:
+          type: array
+          items:
+            type: object
+            required: [book, quantity]
+            properties:
+              book: { type: string, description: "本の名前で参照する。publishers/{p}/books/{b}" }
+              quantity: { type: integer, minimum: 1 }
+              unit_price: { type: integer, readOnly: true, description: 注文時点の税込価格 }
+        state: { type: string, enum: [CONFIRMED, PAYMENT_PENDING, PAYMENT_FAILED, CANCELLED], readOnly: true }
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string, enum: [INVALID_ARGUMENT, NOT_FOUND, FAILED_PRECONDITION, PAYMENT_FAILED, UNAVAILABLE, INTERNAL] }
+            message: { type: string }
+            details: { type: object }
+  responses:
+    Error:
+      description: エラー
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }

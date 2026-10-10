@@ -1,0 +1,30 @@
+[project]
+name = "visit-route-optimizer"
+version = "0.1.0"
+description = "訪問の割当と順番の最適化（OR-Tools Routing）"
+requires-python = ">=3.12"
+dependencies = [
+    "ortools>=9.11",
+    "firebase-functions>=0.4.2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = [".venv"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.uv]
+package = false
