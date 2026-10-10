@@ -12,12 +12,12 @@ export async function solve(req: SolveRequest): Promise<SolveResponse> {
   const base = OPTIMIZER_URL.value();
   if (!base) throw new HttpsError('unavailable', '最適化サービスが設定されていません');
   const url = `${base.replace(/\/$/, '')}/v1/plans:solve`;
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   // 本番は IAM 認証（呼び出し元のサービスアカウントの ID トークン）。ローカル（http://）は省略
-  if (base.startsWith('https://')) {
-    const client = await auth.getIdTokenClient(base);
-    Object.assign(headers, await client.getRequestHeaders());
-  }
+  // getRequestHeaders は Headers を返すので、Object.assign では写せない（Authorization が落ちる）
+  const headers = base.startsWith('https://')
+    ? await (await auth.getIdTokenClient(base)).getRequestHeaders()
+    : new Headers();
+  headers.set('Content-Type', 'application/json');
   const res = await fetch(url, {
     method: 'POST',
     headers,
