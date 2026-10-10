@@ -64,13 +64,18 @@ export const clientSchema = z.object({
   displayName: z.string().min(1).max(50),
   place: placeSchema,
   requiredGender: z.enum(['female', 'male']).nullable(),
-  ngStaffIds: z.array(z.string()).max(50),
   note: z.string().max(500),
   /** 色の丸の番号（0〜7） */
   color: z.number().int().min(0).max(7),
   active: z.boolean(),
 });
 export type Client = z.infer<typeof clientSchema>;
+
+/** orgs/{orgId}/clientPrivate/{clientId}。管理者だけが読む訪問先の情報（スタッフに見せない） */
+export const clientPrivateSchema = z.object({
+  ngStaffIds: z.array(z.string()).max(50),
+});
+export type ClientPrivate = z.infer<typeof clientPrivateSchema>;
 
 /** orgs/{orgId}/visits/{visitId}。staffId は手作業の担当（予定の「予」） */
 export const visitSchema = z.object({

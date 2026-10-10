@@ -1,6 +1,6 @@
 import { jstToMs, type VisitEvent } from '@vrp/shared';
 import { describe, expect, it } from 'vitest';
-import { buildAttendanceDay } from './buildDay';
+import { buildAttendanceDay, sameDay } from './buildDay';
 
 const D = '2026-10-20';
 const t = (hhmm: string) => jstToMs(D, hhmm);
@@ -62,5 +62,14 @@ describe('buildAttendanceDay', () => {
     expect(again.totals.workMinutes).toBe(60);
     expect(again.status).toBe('approved');
     expect(again.version).toBe(first.version + 1);
+  });
+});
+
+describe('sameDay', () => {
+  it('版とキーの順番の違いは同じとみなし、中身の違いは違うとみなす', () => {
+    const day = buildAttendanceDay('s1', '2026-10-20', [], [], null);
+    const reordered = { ...Object.fromEntries(Object.entries(day).reverse()), version: 99 } as typeof day;
+    expect(sameDay(day, reordered)).toBe(true);
+    expect(sameDay(day, { ...day, shiftStart: 1 })).toBe(false);
   });
 });

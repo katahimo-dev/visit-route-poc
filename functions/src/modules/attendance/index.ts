@@ -13,7 +13,7 @@ import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import { callerOf, col, db, parse, REGION, requireManager } from '../../lib/context';
 import { manualPlanOf, routesOf, visitsOfDate } from '../../lib/schedule';
 import { toCsv } from '../export/domain/csv';
-import { buildAttendanceDay, computeTotals, effective } from './domain/buildDay';
+import { buildAttendanceDay, computeTotals, effective, sameDay } from './domain/buildDay';
 
 const dayId = (staffId: string, date: string) => `${staffId}_${date}`;
 
@@ -37,7 +37,10 @@ async function recompute(orgId: string, staffId: string, date: string): Promise<
   const ref = col(orgId, 'attendanceDays').doc(dayId(staffId, date));
   await db.runTransaction(async (tx) => {
     const prev = await tx.get(ref);
-    const day = buildAttendanceDay(staffId, date, planned, events, prev.exists ? (prev.data() as AttendanceDay) : null);
+    const prevDay = prev.exists ? (prev.data() as AttendanceDay) : null;
+    const day = buildAttendanceDay(staffId, date, planned, events, prevDay);
+    // 結果が変わらない記録（勤怠に関係しない記録など）では書かない。書くと onAttendanceDayWritten の連鎖が起きる
+    if (prevDay && sameDay(prevDay, day)) return;
     tx.set(ref, day);
   });
 }

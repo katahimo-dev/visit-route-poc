@@ -129,3 +129,21 @@ export function computeTotals(visits: AttendanceVisit[]): AttendanceDay['totals'
     boundMinutes: min(bound),
   };
 }
+
+/** 版（version）以外の中身が同じか。同じなら書き直さない */
+export function sameDay(a: AttendanceDay, b: AttendanceDay): boolean {
+  const { version: _va, ...ra } = a;
+  const { version: _vb, ...rb } = b;
+  return canonical(ra) === canonical(rb);
+}
+
+/** キーの順番によらない文字列（Firestore から読んだ文書はキーの順番が変わる） */
+function canonical(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(canonical).join(',')}]`;
+  if (v && typeof v === 'object')
+    return `{${Object.keys(v)
+      .sort()
+      .map((k) => `${JSON.stringify(k)}:${canonical((v as Record<string, unknown>)[k])}`)
+      .join(',')}}`;
+  return JSON.stringify(v ?? null);
+}

@@ -4,7 +4,16 @@
  * ログイン：admin@example.com（管理者）/ staff1@example.com（スタッフ）/ operator@example.com（運営者）
  * メールリンクはエミュレーターUI（http://localhost:4000/auth）に表示される。
  */
-import { addDays, type Client, DEFAULT_TERMS, jstDate, type Org, type Staff, type Visit } from '@vrp/shared';
+import {
+  addDays,
+  type Client,
+  type ClientPrivate,
+  DEFAULT_TERMS,
+  jstDate,
+  type Org,
+  type Staff,
+  type Visit,
+} from '@vrp/shared';
 import { initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
@@ -71,7 +80,7 @@ const staff: Record<string, Staff> = {
   },
 };
 
-const clients: Record<string, Client> = {
+const clients: Record<string, Client & ClientPrivate> = {
   c1: {
     displayName: '図書館 ふみ',
     place: { address: '仙台市青葉区春日町（せんだいメディアテーク）', lat: 38.2654, lng: 140.8656 },
@@ -172,7 +181,11 @@ for (const date of [jstDate(Date.now()), addDays(jstDate(Date.now()), 1)]) {
 
 await db.doc(`orgs/${orgId}`).set(org);
 for (const [id, s] of Object.entries(staff)) await db.doc(`orgs/${orgId}/staff/${id}`).set(s);
-for (const [id, c] of Object.entries(clients)) await db.doc(`orgs/${orgId}/clients/${id}`).set(c);
+for (const [id, { ngStaffIds, ...c }] of Object.entries(clients)) {
+  await db.doc(`orgs/${orgId}/clients/${id}`).set(c);
+  // NG スタッフは管理者だけが読む文書に分ける
+  await db.doc(`orgs/${orgId}/clientPrivate/${id}`).set({ ngStaffIds });
+}
 
 async function user(email: string, claims: Record<string, string>) {
   const u = await auth.getUserByEmail(email).catch(() => auth.createUser({ email }));

@@ -1,9 +1,12 @@
 import { getApps, initializeApp } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
+import { setGlobalOptions } from 'firebase-functions/v2';
 import { HttpsError, type CallableRequest } from 'firebase-functions/v2/https';
 import type { z } from 'zod';
 
 if (getApps().length === 0) initializeApp();
+// 連打・不具合・乗っ取られたアカウントで関数が際限なく増えて課金されないよう、全関数の同時インスタンス数に天井を設ける
+setGlobalOptions({ maxInstances: 10 });
 export const db = getFirestore();
 export const REGION = 'asia-northeast1';
 

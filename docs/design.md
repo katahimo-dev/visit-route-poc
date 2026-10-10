@@ -117,8 +117,8 @@ flowchart LR
 
 ### org（事業所・スタッフ・訪問先）
 - 責務：事業所の設定（業種・呼び方・最適化モード `order_only | assign_and_order`・交通費単価・ジオフェンス半径）、スタッフと訪問先のマスタ、ユーザー招待とロール付与、住所→緯度経度の変換と訂正、CSV取込。
-- 持つデータ（持ち主）：事業所設定（`orgs/{orgId}` 本体）、`staff`（氏名・性別・自宅位置・移動手段・勤務曜日と時間・uid）、`clients`（表示名・住所・位置・性別希望・NGスタッフ・メモ）、`analysisIds`（仮名ID対応表。運営者のみ読める）
-- 提供するAPI：`inviteMember`、`geocodeAddress`、`importMasterCsv`（Callable）。マスタの通常の編集は画面から直接（ルールで admin のみ）。
+- 持つデータ（持ち主）：事業所設定（`orgs/{orgId}` 本体）、`staff`（氏名・性別・自宅位置・移動手段・勤務曜日と時間・uid）、`clients`（表示名・住所・位置・性別希望・メモ）、`clientPrivate`（NGスタッフ。管理者だけが読む）、`geocodeCache`（住所変換の結果、30日）、`analysisIds`（仮名ID対応表。運営者のみ読める）。スタッフが読めるスタッフ文書は自分の分だけ（ADR-0006）
+- 提供するAPI：`inviteMember`、`geocodeAddress`、`importMasterCsv`（Callable）。マスタの通常の編集は画面から直接（ルールで admin のみ）。トリガー `onStaffUpdated`（休止・付け替えで古いアカウントのクレームを外し、ログインを切る）。
 - 依存するもの：Firebase Auth（カスタムクレーム）、Google Geocoding API。
 - 配置：`functions/src/modules/org/`、`web/src/features/admin/master/`
 - 完了の条件：
@@ -165,7 +165,7 @@ flowchart LR
 
 ### planning（AI案の生成・比較・決定）
 - 責務：その日の訪問・スタッフ・予測行列を集めて optimizer を呼び、**AI案**として保存。手作業案とAI案を同じ予測行列で再計算して比較（移動時間・距離・交通費・待ち時間・条件違反）。管理者の手直しと決定、理由の記録。前夜の自動生成とおすすめ通知（改）。
-- 持つデータ（持ち主）：`planRuns`（入力のスナップショット・モデル版・ソルバー版・結果＝AI案・計算時間）、`comparisons`（日付×実行ごと）、`decidedPlans`（日付ごと。決定案・決定者・理由・元にした案）、`recommendations`（日付×スタッフ。通知と返答）
+- 持つデータ（持ち主）：`planRuns`（入力のスナップショット・モデル版・ソルバー版・結果＝AI案・計算時間）、`planRunLocks`（requestId ごとの実行の鍵。二重実行の防止と、1時間20回の上限の数え上げ）、`comparisons`（日付×実行ごと）、`decidedPlans`（日付ごと。決定案・決定者・理由・元にした案）、`recommendations`（日付×スタッフ。通知と返答）
 - 提供するAPI：`createPlanRun(date)`、`comparePlans(date, runId)`、`decidePlan(date, base, edits, reason)`、`respondRecommendation(id, answer)`（Callable）。スケジュール関数 `nightlyPlan`（毎晩、翌日分。1回目は通知しない）。
 - 依存するもの：schedule、travel-time、optimizer、org、FCM。
 - 配置：`functions/src/modules/planning/`、`web/src/features/admin/planning/`

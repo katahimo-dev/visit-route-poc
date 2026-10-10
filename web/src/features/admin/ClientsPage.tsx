@@ -1,5 +1,12 @@
-import { type Client, clientSchema, type Place, type Staff } from '@vrp/shared';
-import { doc, setDoc } from 'firebase/firestore';
+import {
+  type Client,
+  type ClientPrivate,
+  clientPrivateSchema,
+  clientSchema,
+  type Place,
+  type Staff,
+} from '@vrp/shared';
+import { doc, writeBatch } from 'firebase/firestore';
 import { useMemo, useState } from 'react';
 import { useToast } from '../../components/Toast';
 import { CLIENT_COLORS, colorOf, initialOf } from '../../lib/colors';
@@ -36,6 +43,9 @@ export default function ClientsPage() {
   const toast = useToast();
   const clientsQ = useOrgCollection<Client>(orgId, 'clients');
   const staffQ = useOrgCollection<Staff>(orgId, 'staff');
+  // NG スタッフはスタッフに見せないので、管理者だけが読める clientPrivate に分けて持つ
+  const privateQ = useOrgCollection<ClientPrivate>(orgId, 'clientPrivate');
+  const ngOf = (id: string) => privateQ.rows?.find((p) => p.id === id)?.ngStaffIds ?? [];
   const [form, setForm] = useState<Form | null>(null);
   const [isNew, setIsNew] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -52,17 +62,21 @@ export default function ClientsPage() {
   const edit = (c: WithId<Client>) => {
     setError(null);
     setIsNew(false);
-    setForm({ ...c, id: c.id, place: { ...c.place }, ngStaffIds: [...c.ngStaffIds] });
+    setForm({ ...c, id: c.id, place: { ...c.place }, ngStaffIds: [...ngOf(c.id)] });
   };
 
   const save = async () => {
     if (!form) return;
     setError(null);
     try {
-      const { id, ...rest } = form;
+      const { id, ngStaffIds, ...rest } = form;
       const data = clientSchema.parse(rest);
+      const priv = clientPrivateSchema.parse({ ngStaffIds });
       const newId = id ?? crypto.randomUUID();
-      await setDoc(doc(db, 'orgs', orgId, 'clients', newId), data);
+      const batch = writeBatch(db);
+      batch.set(doc(db, 'orgs', orgId, 'clients', newId), data);
+      batch.set(doc(db, 'orgs', orgId, 'clientPrivate', newId), priv);
+      await batch.commit();
       setForm({ ...form, id: newId });
       setIsNew(false);
       toast('保存しました');
@@ -120,13 +134,17 @@ export default function ClientsPage() {
                     {c.requiredGender && (
                       <span className="chip">{c.requiredGender === 'female' ? '女性希望' : '男性希望'}</span>
                     )}{' '}
-                    {c.ngStaffIds.length > 0 && (
-                      <span className="chip">NG：{c.ngStaffIds.map(staffName).join('、')}</span>
-                    )}
+                    {ngOf(c.id).length > 0 && <span className="chip">NG：{ngOf(c.id).map(staffName).join('、')}</span>}
                   </td>
                   <td>{c.active ? '' : <span className="chip">休止中</span>}</td>
                   <td>
-                    <button type="button" className="btn btn-small" onClick={() => edit(c)}>
+                    <button
+                      type="button"
+                      className="btn btn-small"
+                      // NG スタッフを読み込む前に保存すると空で上書きするので、読み込むまで押せない
+                      disabled={privateQ.rows === null}
+                      onClick={() => edit(c)}
+                    >
                       直す
                     </button>
                   </td>

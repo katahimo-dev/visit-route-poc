@@ -64,6 +64,20 @@ export async function predictMatrix(
   };
 }
 
+/** 実測区間の計算に使う値（訪問ごとの訂正後の到着・開始・終了・退出と補完の印） */
+function legInputs(day: AttendanceDay): string {
+  return JSON.stringify(
+    day.visits.map((v) => [
+      v.visitId,
+      effective(v, 'arrive'),
+      effective(v, 'start'),
+      effective(v, 'end'),
+      effective(v, 'depart'),
+      v.arriveFilled,
+    ]),
+  );
+}
+
 /**
  * 勤怠候補が更新されたら、連続する訪問の実測区間（前の退出→次の到着）を予測値と並べて保存する。
  * 到着を補完した区間は学習に使わない印（filled）を付ける。
@@ -73,6 +87,9 @@ export const onAttendanceDayWritten = onDocumentWritten(
   async (e) => {
     const day = e.data?.after.data() as AttendanceDay | undefined;
     if (!day) return;
+    // 区間の実測に関わる時刻が変わっていなければ何もしない（承認・確認だけの更新で地図APIを呼ばない）
+    const before = e.data?.before.data() as AttendanceDay | undefined;
+    if (before && legInputs(before) === legInputs(day)) return;
     const orgId = e.params.orgId;
     const done = day.visits
       .map((v) => ({

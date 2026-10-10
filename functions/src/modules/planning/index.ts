@@ -1,5 +1,6 @@
 import {
   type Client,
+  type ClientPrivate,
   createPlanRunRequest,
   evaluatePlan,
   hhmmToMinutes,
@@ -19,6 +20,31 @@ import { OPTIMIZER_URL, solve } from './infrastructure/optimizerClient';
 
 export { OPTIMIZER_URL };
 
+/** 1事業所が1時間に作れるAI案の数（地図API・最適化の課金の天井。押し間違いの連打も止める） */
+const RUNS_PER_HOUR = 20;
+
+/**
+ * 同じ requestId の二重実行を防ぐ鍵を作る（create は既にあると失敗するので原子的）。
+ * 作れたら true、既にあれば false。1時間の上限を超えていたら RESOURCE_EXHAUSTED。
+ */
+async function acquireRun(orgId: string, runId: string, uid: string): Promise<boolean> {
+  const locks = col(orgId, 'planRunLocks');
+  const recent = await locks
+    .where('createdAt', '>=', Date.now() - 3600000)
+    .count()
+    .get();
+  if (recent.data().count >= RUNS_PER_HOUR)
+    throw new HttpsError('resource-exhausted', 'AI案を作る回数が多すぎます。1時間ほどおいてから作ってください');
+  try {
+    await locks.doc(runId).create({ createdAt: Date.now(), createdBy: uid });
+    return true;
+  } catch (e) {
+    // 6 = ALREADY_EXISTS（同じ requestId の再送・二重押し）
+    if ((e as { code?: unknown }).code === 6) return false;
+    throw e;
+  }
+}
+
 /** 最も多い移動手段（α は1日1つの行列で計算する） */
 function majorityMode(staff: Staff[]): TravelMode {
   const count = new Map<TravelMode, number>();
@@ -37,72 +63,99 @@ export const createPlanRun = onCall(
     const { date, requestId, orgId: requestedOrgId } = parse(createPlanRunRequest, req.data);
     const orgId = requireManager(c, requestedOrgId);
     const runId = requestId.replace(/[^A-Za-z0-9_-]/g, '');
+    if (runId.length < 8)
+      throw new HttpsError('invalid-argument', '入力を確認してください', {
+        fields: { requestId: '英数字で指定してください' },
+      });
     const runRef = col(orgId, 'planRuns').doc(runId);
-    if ((await runRef.get()).exists) return { runId };
-
-    const [orgSnap, staffSnap, clientSnap, visits, manual] = await Promise.all([
-      orgDoc(orgId).get(),
-      col(orgId, 'staff').get(),
-      col(orgId, 'clients').get(),
-      visitsOfDate(orgId, date),
-      manualPlanOf(orgId, date),
-    ]);
-    if (!orgSnap.exists) throw new HttpsError('not-found', '事業所がありません');
-    if (visits.length === 0) throw new HttpsError('failed-precondition', 'この日の訪問がありません');
-    const org = orgSnap.data() as Org;
-    const staff = staffSnap.docs.map((d) => ({ id: d.id, ...(d.data() as Staff) }));
-    const clients = new Map(clientSnap.docs.map((d) => [d.id, d.data() as Client]));
-    const manualRoutes = routesOf(visits, manual);
-
-    const prepared = prepare({ org, staff, clients, visits, manualRoutes, weekday: weekday(date) }, date);
-    if (prepared.staffIn.length === 0)
-      throw new HttpsError('failed-precondition', '対象のスタッフがいません（自宅の位置・勤務曜日を確認してください）');
-    const firstStart = Math.min(...visits.map((v) => hhmmToMinutes(v.earliestStart)));
-    const departAt = jstToMs(date, minutesToHhmm(Math.max(0, firstStart - 30)));
-    const mode = majorityMode(staff.filter((s) => prepared.staffIn.some((x) => x.staffId === s.id)));
-    const matrix = await predictMatrix(orgId, prepared.points, mode, date, departAt);
-
-    const solveReq = {
-      ...prepared.request,
-      requestId: runId,
-      // 解の数で打ち切る（同じ入力で同じ結果。8人×30件で約5秒）。時間は安全弁
-      limits: { solutionLimit: 500, timeLimitSeconds: 25 },
-      matrix: {
-        points: prepared.points.map((p) => ({ id: p.id })),
-        seconds: matrix.seconds,
-        meters: matrix.meters,
-        modelVersion: matrix.modelVersion,
-      },
-    };
-    const started = Date.now();
-    const result = await solve(solveReq);
-    const elapsed = Date.now() - started;
-
-    const evalM = toEvalMatrix(prepared.points, matrix.seconds, matrix.meters);
-    const aiRoutes = Object.fromEntries(result.routes.map((r) => [r.staffId, r.stops.map((s) => s.visitId)]));
-    const metrics = {
-      manual: evaluatePlan(manualRoutes, prepared.staffIn, prepared.visitsIn, evalM, org.fareYenPerKm),
-      ai: evaluatePlan(aiRoutes, prepared.staffIn, prepared.visitsIn, evalM, org.fareYenPerKm),
-    };
-    await runRef.set({
-      date,
-      requestId,
-      mode: org.optimizeMode,
-      travelMode: mode,
-      createdBy: c.uid,
-      createdAt: Date.now(),
-      modelVersion: matrix.modelVersion,
-      solverVersion: result.solverVersion,
-      // Firestore は配列の配列を保存できないため、入力（行列を含む）は JSON 文字列で残す（再現用）
-      inputJson: JSON.stringify(solveReq),
-      baseSecondsJson: JSON.stringify(matrix.baseSeconds),
-      manualRoutes,
-      manualMinutesSpent: manual?.minutesSpent ?? null,
-      result,
-      metrics,
-      skipped: prepared.skipped,
-      computeMillis: elapsed,
-    });
+    if (!(await acquireRun(orgId, runId, c.uid))) return { runId };
+    try {
+      await run(orgId, runId, runRef, date, requestId, c.uid);
+    } catch (e) {
+      // 失敗したら鍵を外し、同じ requestId でやり直せるようにする
+      await col(orgId, 'planRunLocks')
+        .doc(runId)
+        .delete()
+        .catch(() => undefined);
+      throw e;
+    }
     return { runId };
   },
 );
+
+async function run(
+  orgId: string,
+  runId: string,
+  runRef: FirebaseFirestore.DocumentReference,
+  date: string,
+  requestId: string,
+  uid: string,
+): Promise<void> {
+  const [orgSnap, staffSnap, clientSnap, privateSnap, visits, manual] = await Promise.all([
+    orgDoc(orgId).get(),
+    col(orgId, 'staff').get(),
+    col(orgId, 'clients').get(),
+    col(orgId, 'clientPrivate').get(),
+    visitsOfDate(orgId, date),
+    manualPlanOf(orgId, date),
+  ]);
+  if (!orgSnap.exists) throw new HttpsError('not-found', '事業所がありません');
+  if (visits.length === 0) throw new HttpsError('failed-precondition', 'この日の訪問がありません');
+  const org = orgSnap.data() as Org;
+  const staff = staffSnap.docs.map((d) => ({ id: d.id, ...(d.data() as Staff) }));
+  const privates = new Map(privateSnap.docs.map((d) => [d.id, d.data() as ClientPrivate]));
+  const clients = new Map(
+    clientSnap.docs.map((d) => [d.id, { ngStaffIds: [], ...(d.data() as Client), ...privates.get(d.id) }]),
+  );
+  const manualRoutes = routesOf(visits, manual);
+
+  const prepared = prepare({ org, staff, clients, visits, manualRoutes, weekday: weekday(date) }, date);
+  if (prepared.staffIn.length === 0)
+    throw new HttpsError('failed-precondition', '対象のスタッフがいません（自宅の位置・勤務曜日を確認してください）');
+  const firstStart = Math.min(...visits.map((v) => hhmmToMinutes(v.earliestStart)));
+  const departAt = jstToMs(date, minutesToHhmm(Math.max(0, firstStart - 30)));
+  const mode = majorityMode(staff.filter((s) => prepared.staffIn.some((x) => x.staffId === s.id)));
+  const matrix = await predictMatrix(orgId, prepared.points, mode, date, departAt);
+
+  const solveReq = {
+    ...prepared.request,
+    requestId: runId,
+    // 解の数で打ち切る（同じ入力で同じ結果。8人×30件で約5秒）。時間は安全弁
+    limits: { solutionLimit: 500, timeLimitSeconds: 25 },
+    matrix: {
+      points: prepared.points.map((p) => ({ id: p.id })),
+      seconds: matrix.seconds,
+      meters: matrix.meters,
+      modelVersion: matrix.modelVersion,
+    },
+  };
+  const started = Date.now();
+  const result = await solve(solveReq);
+  const elapsed = Date.now() - started;
+
+  const evalM = toEvalMatrix(prepared.points, matrix.seconds, matrix.meters);
+  const aiRoutes = Object.fromEntries(result.routes.map((r) => [r.staffId, r.stops.map((s) => s.visitId)]));
+  const metrics = {
+    manual: evaluatePlan(manualRoutes, prepared.staffIn, prepared.visitsIn, evalM, org.fareYenPerKm),
+    ai: evaluatePlan(aiRoutes, prepared.staffIn, prepared.visitsIn, evalM, org.fareYenPerKm),
+  };
+  await runRef.set({
+    date,
+    requestId,
+    mode: org.optimizeMode,
+    travelMode: mode,
+    createdBy: uid,
+    createdAt: Date.now(),
+    modelVersion: matrix.modelVersion,
+    solverVersion: result.solverVersion,
+    // Firestore は配列の配列を保存できないため、入力（行列を含む）は JSON 文字列で残す（再現用）
+    inputJson: JSON.stringify(solveReq),
+    baseSecondsJson: JSON.stringify(matrix.baseSeconds),
+    manualRoutes,
+    manualMinutesSpent: manual?.minutesSpent ?? null,
+    result,
+    metrics,
+    skipped: prepared.skipped,
+    computeMillis: elapsed,
+  });
+}
