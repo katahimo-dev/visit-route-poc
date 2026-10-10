@@ -16,11 +16,13 @@ import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { col, db, orgDoc, parse, REGION } from '../../lib/context';
 import {
   canSend,
+  demoStaffOf,
   failed,
   issue,
   type LoginCodeDoc,
   loginCodeId,
   MAX_ATTEMPTS,
+  MAX_DEMO_STAFF,
   newCode,
   shouldRevoke,
   verify,
@@ -170,26 +172,30 @@ async function demoOrg(): Promise<string> {
   return orgId;
 }
 
+/** seed が作ったスタッフの文書（s1〜s20 を ID で読む。デモの管理者がスタッフを大量に足しても読む量は増えない） */
+async function demoStaffDocs(orgId: string) {
+  const refs = Array.from({ length: MAX_DEMO_STAFF }, (_, i) => col(orgId, 'staff').doc(`s${i + 1}`));
+  return (await db.getAll(...refs)).filter((d) => d.exists);
+}
+
 /**
  * デモ用：ログインする人を選ぶための、デモの事業所のスタッフ（未ログインで呼べる）。
- * 返すのは架空の人物の名前と、その日の訪問件数だけ（ADR-0007）
+ * 返すのは seed が作った架空の人物の名前と、その日の訪問件数だけ（ADR-0007）
  */
 export const demoStaffList = onCall({ region: REGION }, async (req) => {
   const orgId = await demoOrg();
   const { date } = parse(demoStaffListRequest, req.data);
-  const [staffSnap, visitsSnap] = await Promise.all([
-    col(orgId, 'staff').where('active', '==', true).get(),
+  const [staffDocs, visitsSnap] = await Promise.all([
+    demoStaffDocs(orgId),
     col(orgId, 'visits').where('date', '==', date).get(),
   ]);
-  const counts = new Map<string, number>();
-  for (const d of visitsSnap.docs) {
-    const v = d.data() as Visit;
-    if (!v.cancelled && v.staffId) counts.set(v.staffId, (counts.get(v.staffId) ?? 0) + 1);
-  }
-  const staff = staffSnap.docs
-    .map((d) => ({ id: d.id, name: (d.data() as Staff).name, visits: counts.get(d.id) ?? 0 }))
-    .sort((a, b) => a.id.localeCompare(b.id, 'en', { numeric: true }));
-  return { staff };
+  const staff = staffDocs.map((d) => ({ id: d.id, ...(d.data() as Staff) }));
+  return {
+    staff: demoStaffOf(
+      staff,
+      visitsSnap.docs.map((d) => d.data() as Visit),
+    ),
+  };
 });
 
 /**
@@ -209,11 +215,15 @@ export const demoSignIn = onCall({ region: REGION }, async (req) => {
     await ensure(uid, { orgId, role: 'admin' });
     return { token: await auth.createCustomToken(uid) };
   }
-  const staff = staffId
-    ? await col(orgId, 'staff').doc(staffId).get()
-    : (await col(orgId, 'staff').where('active', '==', true).orderBy('__name__').limit(1).get()).docs[0];
-  if (!staff?.exists || (staff.data() as Staff).active !== true)
-    throw new HttpsError('not-found', 'デモのスタッフがいません');
+  // 選べるのはログイン画面に並ぶ人（seed が作った在籍中のスタッフ）だけ。無指定なら最初の人
+  const docs = await demoStaffDocs(orgId);
+  const choices = demoStaffOf(
+    docs.map((d) => ({ id: d.id, ...(d.data() as Staff) })),
+    [],
+  );
+  const id = staffId ?? choices[0]?.id;
+  const staff = choices.some((c) => c.id === id) ? docs.find((d) => d.id === id) : undefined;
+  if (!staff) throw new HttpsError('not-found', 'デモのスタッフがいません');
   // 実在のアカウントのクレームを書き換えないよう、常にデモ用のアカウントを使い、スタッフに紐づけ直す
   const uid = `demo-staff-${orgId}-${staff.id}`;
   await ensure(uid, { orgId, role: 'staff', staffId: staff.id });

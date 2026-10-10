@@ -28,7 +28,10 @@ export function RouteMap({
 
   useEffect(() => {
     if (!el.current || map.current) return;
-    const m = L.map(el.current, { zoomControl: true, attributionControl: true }).setView([38.2682, 140.8694], 12);
+    const m = L.map(el.current, { zoomControl: true, attributionControl: true, zoomSnap: 0.25 }).setView(
+      [38.2682, 140.8694],
+      12,
+    );
     L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png', {
       attribution: '<a href="https://maps.gsi.go.jp/development/ichiran.html">国土地理院</a>',
       maxZoom: 18,
@@ -66,7 +69,7 @@ export function RouteMap({
     }
     const all = [...points, ...lines.flatMap((l) => l.points)];
     if (all.length > 0)
-      m.fitBounds(L.latLngBounds(all.map((p) => [p.lat, p.lng] as [number, number])).pad(0.2), { maxZoom: 15 });
+      m.fitBounds(L.latLngBounds(all.map((p) => [p.lat, p.lng] as [number, number])).pad(0.1), { maxZoom: 15 });
   }, [points, lines]);
 
   return <div ref={el} className="map" style={{ height }} />;

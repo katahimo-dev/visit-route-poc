@@ -446,7 +446,7 @@ export default function SchedulePage() {
           {lines.length > 0 && (
             <div className="card stack">
               <h3>手作業案の地図（点線：{terms.staff}ごとのルート、「家」は自宅）</h3>
-              <RouteMap points={points} lines={lines} height={360} />
+              <RouteMap points={points} lines={lines} height={460} />
               <div className="row sub" style={{ flexWrap: 'wrap' }}>
                 {columns
                   .filter((s) => (view.cols[s.id]?.length ?? 0) > 0)

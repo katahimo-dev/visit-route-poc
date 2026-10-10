@@ -2,10 +2,13 @@ import { describe, expect, it } from 'vitest';
 import {
   CODE_TTL_MS,
   canSend,
+  demoStaffOf,
   failed,
+  isDemoStaffId,
   issue,
   loginCodeId,
   MAX_ATTEMPTS,
+  MAX_DEMO_STAFF,
   MAX_FAILURES_PER_DAY,
   newCode,
   shouldRevoke,
@@ -69,5 +72,35 @@ describe('使っていないアカウントの再認証', () => {
     expect(shouldRevoke({ role: 'staff', lastActiveMs: now - 30 * day, tokensValidAfterMs: now - 15 * day, now })).toBe(
       false,
     );
+  });
+});
+
+describe('デモのスタッフ', () => {
+  it('seed が作った在籍中の人だけを番号順に、その日の件数（取り消しを除く）つきで返す', () => {
+    const staff = [
+      { id: 's10', name: '十', active: true },
+      { id: 's2', name: '二', active: true },
+      { id: 's3', name: '休止', active: false },
+      { id: '0b6f4c1e-added-by-demo-admin', name: 'こちらへログイン', active: true },
+    ];
+    const visits = [
+      { staffId: 's2', cancelled: false },
+      { staffId: 's2', cancelled: true },
+      { staffId: null, cancelled: false },
+      { staffId: 's10', cancelled: false },
+    ];
+    expect(demoStaffOf(staff, visits)).toEqual([
+      { id: 's2', name: '二', visits: 1 },
+      { id: 's10', name: '十', visits: 1 },
+    ]);
+  });
+  it('件数に上限がある', () => {
+    const many = Array.from({ length: 50 }, (_, i) => ({ id: `s${i + 1}`, name: `${i}`, active: true }));
+    expect(demoStaffOf(many, [])).toHaveLength(MAX_DEMO_STAFF);
+  });
+  it('seed の ID の形だけを通す', () => {
+    expect(isDemoStaffId('s1')).toBe(true);
+    expect(isDemoStaffId('s1/x')).toBe(false);
+    expect(isDemoStaffId('staff1')).toBe(false);
   });
 });

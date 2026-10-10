@@ -6,7 +6,7 @@
  * 実証用のプロジェクトに入れるとき（デモ期間）：SEED_PROJECT=<プロジェクトID> pnpm seed
  *   事業所 demo にだけ書く。デモの印の無い事業所 demo（実データ）があれば止まる。片付けは scripts/endDemo.ts
  * 予定は実行日から SEED_UNTIL（既定 2026-11-30）まで毎日入る（土日も営業）。日ごとに少しずつ変える。
- * 入れ直すと、実行日以降の訪問・手作業案・AI案は作り直す（過去の記録・勤怠は消さない）。
+ * 入れ直すと、実行日以降の訪問・手作業案・AI案は作り直す。スタッフの記録がある日と、過去の記録・勤怠には触れない。
  */
 import {
   addDays,
@@ -331,6 +331,8 @@ const isWeekend = (date: string) => weekday(date) === 0 || weekday(date) === 6;
 const shiftBy = (hhmm: string, min: number) => minutesToHhmm(hhmmToMinutes(hhmm) + min);
 const dates: string[] = [];
 for (let d = jstDate(Date.now()); d <= until; d = addDays(d, 1)) dates.push(d);
+/** 日ごとの変化の番号。日付だけで決まる（いつ入れ直しても、同じ日は同じ予定になる） */
+const dayNumber = (date: string) => Math.round((Date.parse(date) - Date.parse('2026-01-01')) / 86400000);
 
 /**
  * その日の訪問（同じ日なら毎回同じ）。平日は20か所から日ごとに3か所前後が休み、土日は印のある8か所。
@@ -392,17 +394,26 @@ function manualRoutesOf(date: string, n: number, visits: (Visit & { id: string }
 // 事業所の文書を先に書く（途中で止まっても、endDemo が事業所を見つけて片付けられるように）
 await db.doc(`orgs/${orgId}`).set(org);
 
-// 実行日以降の予定と、その日のAI案を作り直す（訪問先・スタッフの入れ替えで古い訪問が残らないように）
+// スタッフの記録がある日（きょうの途中など）は作り直さない（訪問が消えたり担当が変わったりして、勤怠候補が崩れるため）
 const first = dates[0] ?? jstDate(Date.now());
+const recorded = new Set(
+  (await db.collection(`orgs/${orgId}/events`).where('date', '>=', first).select('date').get()).docs.map(
+    (d) => d.get('date') as string,
+  ),
+);
+const targets = dates.filter((d) => !recorded.has(d));
+
+// それ以外の実行日以降の予定と、その日のAI案を作り直す（訪問先・スタッフの入れ替えで古い訪問が残らないように）
 const writer = db.bulkWriter();
 for (const name of ['visits', 'manualPlans', 'planRuns']) {
   const old = await db.collection(`orgs/${orgId}/${name}`).where('date', '>=', first).get();
-  for (const d of old.docs) writer.delete(d.ref);
+  for (const d of old.docs) if (!recorded.has(d.get('date'))) writer.delete(d.ref);
 }
 await writer.close();
 
 let total = 0;
-for (const [n, date] of dates.entries()) {
+for (const date of targets) {
+  const n = dayNumber(date);
   const batch = db.batch();
   const visits = visitsOf(date, n);
   const routes = manualRoutesOf(date, n, visits);
@@ -439,5 +450,5 @@ for (const [id, s] of Object.entries(staff)) {
   await db.doc(`orgs/${orgId}/staff/${id}`).update({ uid });
 }
 console.log(
-  `デモデータを入れました（事業所 demo、スタッフ ${Object.keys(staff).length}人・訪問先 ${clientSeeds.length}か所、${first}〜${until} の ${dates.length} 日分・訪問 ${total} 件）`,
+  `デモデータを入れました（事業所 demo、スタッフ ${Object.keys(staff).length}人・訪問先 ${clientSeeds.length}か所、${first}〜${until} の ${targets.length} 日分・訪問 ${total} 件。記録がある ${recorded.size} 日はそのまま）`,
 );
