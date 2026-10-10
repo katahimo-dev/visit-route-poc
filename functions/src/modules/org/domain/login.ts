@@ -106,3 +106,22 @@ export function shouldRevoke(u: {
   if (u.tokensValidAfterMs !== null && u.tokensValidAfterMs >= u.lastActiveMs) return false;
   return u.now - u.lastActiveMs > days * 86400000;
 }
+
+/** デモで選べるスタッフ：seedDemo が作った人（s1, s2, …）だけ。デモの管理者が足したスタッフはログイン画面に出さない */
+export const isDemoStaffId = (id: string): boolean => /^s\d{1,2}$/.test(id);
+/** ログイン画面に並べる上限 */
+export const MAX_DEMO_STAFF = 20;
+
+/** デモのログイン画面に並べるスタッフ（在籍中・seed が作った人だけ、ID の番号順）と、その日の訪問件数 */
+export function demoStaffOf(
+  staff: { id: string; name: string; active: boolean }[],
+  visits: { staffId: string | null; cancelled: boolean }[],
+): { id: string; name: string; visits: number }[] {
+  const counts = new Map<string, number>();
+  for (const v of visits) if (!v.cancelled && v.staffId) counts.set(v.staffId, (counts.get(v.staffId) ?? 0) + 1);
+  return staff
+    .filter((s) => s.active && isDemoStaffId(s.id))
+    .sort((a, b) => a.id.localeCompare(b.id, 'en', { numeric: true }))
+    .slice(0, MAX_DEMO_STAFF)
+    .map((s) => ({ id: s.id, name: s.name, visits: counts.get(s.id) ?? 0 }));
+}

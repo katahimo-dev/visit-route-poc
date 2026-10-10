@@ -1,4 +1,12 @@
-import { demoSignInRequest, type Org, requestLoginCodeRequest, type Staff, verifyLoginCodeRequest } from '@vrp/shared';
+import {
+  demoSignInRequest,
+  demoStaffListRequest,
+  type Org,
+  requestLoginCodeRequest,
+  type Staff,
+  type Visit,
+  verifyLoginCodeRequest,
+} from '@vrp/shared';
 import { getAuth } from 'firebase-admin/auth';
 import { Timestamp } from 'firebase-admin/firestore';
 import { defineString } from 'firebase-functions/params';
@@ -8,11 +16,13 @@ import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { col, db, orgDoc, parse, REGION } from '../../lib/context';
 import {
   canSend,
+  demoStaffOf,
   failed,
   issue,
   type LoginCodeDoc,
   loginCodeId,
   MAX_ATTEMPTS,
+  MAX_DEMO_STAFF,
   newCode,
   shouldRevoke,
   verify,
@@ -151,16 +161,50 @@ export const revokeInactiveSessions = onSchedule(
 );
 
 /**
- * デモ用のログイン。メール不要で、デモの事業所の管理者か最初のスタッフとしてログインする。
+ * デモの事業所の ID。デモの環境でなければ止める。
+ * 設定の誤り（実在の事業所の ID を書いた等）で実データに入れないよう、デモの印（seedDemo が付ける）を確かめる
+ */
+async function demoOrg(): Promise<string> {
+  const orgId = DEMO_ORG_ID.value();
+  if (!orgId) throw new HttpsError('permission-denied', 'デモは使えません');
+  const org = (await orgDoc(orgId).get()).data() as Org | undefined;
+  if (org?.demo !== true) throw new HttpsError('permission-denied', 'デモは使えません');
+  return orgId;
+}
+
+/** seed が作ったスタッフの文書（s1〜s20 を ID で読む。デモの管理者がスタッフを大量に足しても読む量は増えない） */
+async function demoStaffDocs(orgId: string) {
+  const refs = Array.from({ length: MAX_DEMO_STAFF }, (_, i) => col(orgId, 'staff').doc(`s${i + 1}`));
+  return (await db.getAll(...refs)).filter((d) => d.exists);
+}
+
+/**
+ * デモ用：ログインする人を選ぶための、デモの事業所のスタッフ（未ログインで呼べる）。
+ * 返すのは seed が作った架空の人物の名前と、その日の訪問件数だけ（ADR-0007）
+ */
+export const demoStaffList = onCall({ region: REGION }, async (req) => {
+  const orgId = await demoOrg();
+  const { date } = parse(demoStaffListRequest, req.data);
+  const [staffDocs, visitsSnap] = await Promise.all([
+    demoStaffDocs(orgId),
+    col(orgId, 'visits').where('date', '==', date).get(),
+  ]);
+  const staff = staffDocs.map((d) => ({ id: d.id, ...(d.data() as Staff) }));
+  return {
+    staff: demoStaffOf(
+      staff,
+      visitsSnap.docs.map((d) => d.data() as Visit),
+    ),
+  };
+});
+
+/**
+ * デモ用のログイン。メール不要で、デモの事業所の管理者か、選んだスタッフ（無指定なら最初の人）としてログインする。
  * 画面説明・お試し用。入れるのはデモの印（demo: true）のある架空の事業所だけで、実データの事業所には入れない（ADR-0007）。
  */
 export const demoSignIn = onCall({ region: REGION }, async (req) => {
-  const orgId = DEMO_ORG_ID.value();
-  if (!orgId) throw new HttpsError('permission-denied', 'デモは使えません');
-  const { as } = parse(demoSignInRequest, req.data);
-  // 設定の誤り（実在の事業所の ID を書いた等）で実データに入れないよう、デモの印（seedDemo が付ける）を確かめる
-  const org = (await orgDoc(orgId).get()).data() as Org | undefined;
-  if (org?.demo !== true) throw new HttpsError('permission-denied', 'デモは使えません');
+  const orgId = await demoOrg();
+  const { as, staffId } = parse(demoSignInRequest, req.data);
   const auth = getAuth();
   const ensure = async (uid: string, claims: Record<string, string>) => {
     await auth.getUser(uid).catch(() => auth.createUser({ uid, displayName: 'デモ' }));
@@ -171,8 +215,14 @@ export const demoSignIn = onCall({ region: REGION }, async (req) => {
     await ensure(uid, { orgId, role: 'admin' });
     return { token: await auth.createCustomToken(uid) };
   }
-  const staffSnap = await col(orgId, 'staff').where('active', '==', true).orderBy('__name__').limit(1).get();
-  const staff = staffSnap.docs[0];
+  // 選べるのはログイン画面に並ぶ人（seed が作った在籍中のスタッフ）だけ。無指定なら最初の人
+  const docs = await demoStaffDocs(orgId);
+  const choices = demoStaffOf(
+    docs.map((d) => ({ id: d.id, ...(d.data() as Staff) })),
+    [],
+  );
+  const id = staffId ?? choices[0]?.id;
+  const staff = choices.some((c) => c.id === id) ? docs.find((d) => d.id === id) : undefined;
   if (!staff) throw new HttpsError('not-found', 'デモのスタッフがいません');
   // 実在のアカウントのクレームを書き換えないよう、常にデモ用のアカウントを使い、スタッフに紐づけ直す
   const uid = `demo-staff-${orgId}-${staff.id}`;

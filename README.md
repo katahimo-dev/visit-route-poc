@@ -38,7 +38,7 @@ pnpm seed     # デモデータ（仙台市の公共施設を擬人化した架�
 pnpm smoke    # 通し確認（AI案 → 記録 → 勤怠 → 承認 → CSV）
 ```
 
-ログイン：`admin@example.com`（管理者）／`staff1@example.com`（スタッフ）／`operator@example.com`（運営者）。
+ログイン：`admin@example.com`（管理者）／`staff1〜8@example.com`（スタッフ）／`operator@example.com`（運営者）。
 ログインコード（6桁）はエミュレーターの関数ログ（http://127.0.0.1:4000/logs）に出る。ログイン画面の「デモで試す」（`VITE_DEMO_LOGIN=true`）ならメールなしで入れる。
 
 `pnpm emulators` / `pnpm test:rules` は `scripts/dev/honor-no-proxy.cjs` を読み込む（HTTPS_PROXY がある環境で、firebase-tools が NO_PROXY を無視してローカル宛ての通信をプロキシに送る問題の回避。外部への通信はそのままプロキシを通る）。
@@ -83,8 +83,8 @@ pnpm test:rules    # セキュリティルール（エミュレーター）
 
 **デモ期間**（今の設定）
 - `functions/.env.corded-academy-502703-f5` に `DEMO_ORG_ID=demo`。画面は `web/.env.production.local` に `VITE_DEMO_LOGIN=true` を書いてビルド
-- データ：`SEED_PROJECT=corded-academy-502703-f5 pnpm seed`（GOOGLE_APPLICATION_CREDENTIALS か gcloud の ADC で）。予定は実行日から `SEED_UNTIL`（既定 2026-11-30）まで毎日入る（土日はスタッフ1人で3件）。入れ直しても記録は消えない
-- ログイン画面の「デモで試す（スタッフ／管理者）」で、メールなしで入れる。デモの印（`demo: true`）のある事業所にしか入れない
+- データ：`SEED_PROJECT=corded-academy-502703-f5 pnpm seed`（GOOGLE_APPLICATION_CREDENTIALS か gcloud の ADC で）。スタッフ8人・訪問先20か所。予定は実行日から `SEED_UNTIL`（既定 2026-11-30）まで毎日入る（平日は17件前後、土日はスタッフ3人で8件）。入れ直すと実行日以降の予定・AI案は作り直す（同じ日は同じ予定になる。スタッフの記録がある日と、過去の記録・勤怠はそのまま）
+- ログイン画面の「デモで試す」で、管理者か、選んだスタッフとしてメールなしで入れる（スタッフはきょうの件数つきで並ぶ）。デモの印（`demo: true`）のある事業所にしか入れない
 - この間は招待が止まり、コードのログインは運営者だけになる（誰でも管理者になれるので、他人のアドレスへの送信の踏み台にしない）。地図APIのキーは無くてよい（移動時間は直線距離の概算）
 - 運営者の作業（実証データの CSV 出力など）をデモ期間中にするなら Trigger Email を用意する。用意しなければ、運営者の作業は切り替え後に行う
 

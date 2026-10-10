@@ -22,8 +22,20 @@ export const verifyLoginCodeRequest = z.object({
   code: z.string().regex(/^\d{6}$/, '6桁の数字で入力してください'),
 });
 export const signInTokenResponse = z.object({ token: z.string() });
-/** デモ用のログイン（デモの事業所が設定された環境だけ） */
-export const demoSignInRequest = z.object({ as: z.enum(['admin', 'staff']) });
+/** デモ用のログイン（デモの事業所が設定された環境だけ）。staffId は as=staff のとき誰として入るか（null なら最初の人） */
+export const demoSignInRequest = z.object({
+  as: z.enum(['admin', 'staff']),
+  staffId: z
+    .string()
+    .regex(/^[\w-]{1,64}$/)
+    .nullable()
+    .default(null),
+});
+/** デモ用：ログインする人を選ぶための、デモの事業所のスタッフ（架空の人物だけ）。date の訪問件数つき */
+export const demoStaffListRequest = z.object({ date: dateSchema });
+export const demoStaffListResponse = z.object({
+  staff: z.array(z.object({ id: z.string(), name: z.string(), visits: z.number().int() })),
+});
 
 export const geocodeAddressRequest = z.object({ address: z.string().min(1).max(200) });
 export const geocodeAddressResponse = z.object({
@@ -72,6 +84,7 @@ export const CALLABLES = {
   requestLoginCode: { req: requestLoginCodeRequest, res: requestLoginCodeResponse },
   verifyLoginCode: { req: verifyLoginCodeRequest, res: signInTokenResponse },
   demoSignIn: { req: demoSignInRequest, res: signInTokenResponse },
+  demoStaffList: { req: demoStaffListRequest, res: demoStaffListResponse },
   geocodeAddress: { req: geocodeAddressRequest, res: geocodeAddressResponse },
   createPlanRun: { req: createPlanRunRequest, res: createPlanRunResponse },
   correctAttendance: { req: correctAttendanceRequest, res: attendanceVersionResponse },

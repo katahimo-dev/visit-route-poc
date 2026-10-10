@@ -309,3 +309,97 @@ th {
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 12px;
 }
+
+/* 予定：訪問の一覧と回る順番 */
+.nowrap {
+  white-space: nowrap;
+}
+.ellipsis {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.warn-text {
+  color: #a46d0a;
+}
+.table-scroll {
+  overflow-x: auto;
+}
+.visit-table td {
+  vertical-align: middle;
+}
+.visit-table .row-unassigned {
+  background: #fdf7ea;
+}
+.visit-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.staff-select {
+  min-width: 170px;
+  padding: 6px 8px;
+  border-left-width: 6px;
+}
+.route-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 12px;
+}
+.route-col {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1.5px solid var(--line);
+  border-top: 6px solid var(--line);
+  border-radius: 14px;
+  min-width: 0;
+}
+.route-item {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-top: 1px solid var(--line);
+}
+.route-move {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.btn-icon {
+  padding: 0 8px;
+  font-size: 0.7rem;
+  line-height: 1.6;
+  border-radius: 8px;
+}
+.savebar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--card);
+  border-radius: var(--radius);
+  box-shadow: 0 -2px 10px rgba(80, 50, 30, 0.12);
+  z-index: 5;
+}
+
+/* ログイン：デモのスタッフを選ぶ */
+.demo-staff {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 8px;
+}
+.demo-staff .btn {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px;
+}

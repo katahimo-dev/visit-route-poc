@@ -9,8 +9,8 @@ import ClientsPage from './ClientsPage';
 import { AdminProvider } from './common';
 import ExportPage from './ExportPage';
 import PlanPage from './PlanPage';
-import SchedulePage from './SchedulePage';
 import StaffPage from './StaffPage';
+import SchedulePage from './schedule/SchedulePage';
 
 const ORG_KEY = 'admin.orgId';
 

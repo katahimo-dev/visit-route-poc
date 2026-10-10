@@ -9,6 +9,7 @@ export {
 export { exportStudyData } from './modules/export';
 export {
   demoSignIn,
+  demoStaffList,
   geocodeAddress,
   inviteMember,
   onStaffUpdated,

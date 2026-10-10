@@ -98,4 +98,11 @@ export const geocodeAddress = onCall({ region: REGION, secrets: [MAPS_SERVER_KEY
   return { candidates };
 });
 
-export { DEMO_ORG_ID, demoSignIn, requestLoginCode, revokeInactiveSessions, verifyLoginCode } from './login';
+export {
+  DEMO_ORG_ID,
+  demoSignIn,
+  demoStaffList,
+  requestLoginCode,
+  revokeInactiveSessions,
+  verifyLoginCode,
+} from './login';
