@@ -22,7 +22,8 @@ export async function osrmLeg(
     const headers = base.startsWith('https://')
       ? await (await auth.getIdTokenClient(base)).getRequestHeaders()
       : new Headers();
-    const res = await fetch(osrmRouteUrl(base, a, b), { headers, signal: AbortSignal.timeout(5000) });
+    // 最小0インスタンスなので、コールドスタート（データの読み込み）を見込んで長めに待つ
+    const res = await fetch(osrmRouteUrl(base, a, b), { headers, signal: AbortSignal.timeout(15000) });
     // ルートなしは 400（code: NoRoute）で返るので、本文を見て判断する
     return parseOsrmRoute(await res.json());
   } catch (e) {

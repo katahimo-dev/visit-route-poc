@@ -45,6 +45,7 @@ const CONCURRENCY = 4;
  * 近傍の区間（neighborPairs）だけをキャッシュ（legCache, 30日）→ Routes API の順に引き、
  * 残りの区間は直線距離の概算を、同じ行列の実測から求めた倍率で補正して埋める。
  * キャッシュの時間区分は時間帯（朝・日中・夕方。日本時間）で、補正モデルの区分と同じ。
+ * 過去の出発時刻は Routes API に渡せず「今」の交通で返るので、そのときは今の時間帯をキーにする。
  */
 export async function baseMatrix(
   orgId: string,
@@ -52,7 +53,7 @@ export async function baseMatrix(
   mode: TravelMode,
   departAtMs: number,
 ): Promise<BaseLeg[][]> {
-  const band = timeBandOf(hhmmToMinutes(jstHhmm(departAtMs)));
+  const band = timeBandOf(hhmmToMinutes(jstHhmm(Math.max(departAtMs, Date.now()))));
   const out: (BaseLeg | null)[][] = points.map((_, i) =>
     points.map((__, j) => (i === j ? { seconds: 0, meters: 0, source: 'routes_api' as const } : null)),
   );
@@ -95,17 +96,24 @@ export async function baseMatrix(
         const batch = cache.firestore.batch();
         destinations.forEach((j, k) => {
           const f = fetched[k];
-          if (f) out[origin]![j] = { ...f, source: 'routes_api' };
-          // ルートなしも覚えておき、毎回聞き直さない
-          batch.set(cache.doc(hashOf([origin, j])), f ? { ...f, fetchedAt: now } : { noRoute: true, fetchedAt: now });
+          if (f === 'no_route') {
+            // ルートなしは覚えておき、毎回聞き直さない（要素ごとのエラーは一時的かもしれないので覚えない）
+            batch.set(cache.doc(hashOf([origin, j])), { noRoute: true, fetchedAt: now });
+          } else if (f) {
+            out[origin]![j] = { ...f, source: 'routes_api' };
+            batch.set(cache.doc(hashOf([origin, j])), { ...f, fetchedAt: now });
+          }
         });
-        await batch.commit();
+        // キャッシュに書けなくても、取得済みの結果で行列は作れるので止めない
+        await batch.commit().catch((e: unknown) => {
+          logger.warn('travel_time.leg_cache_write_failed', { reason: e instanceof Error ? e.name : 'unknown' });
+        });
       }),
     );
   }
   if (failed) logger.warn('travel_time.routes_api_partial', { failedRequests: failed, requests: groups.length });
 
-  // 失敗・ルートなしの近傍区間は fallback、近傍外は estimate で埋める
+  // 失敗・ルートなし・要素エラーの近傍区間は fallback、近傍外は estimate で埋める
   for (const [i, j] of pairs)
     if (!out[i]![j]) out[i]![j] = { ...fallbackLeg(points[i]!, points[j]!, mode), source: 'fallback' };
   return fillEstimates(out, points, mode, 'estimate');
@@ -130,20 +138,26 @@ function fillEstimates(
     row.map((l, j) => {
       if (l) return l;
       const e = fallbackLeg(points[i]!, points[j]!, mode);
-      return { seconds: Math.round(e.seconds * scale), meters: Math.round(e.meters * scale), source };
+      // 倍率は主に速度の差なので、距離には掛けない
+      return { seconds: Math.round(e.seconds * scale), meters: e.meters, source };
     }),
   );
 }
 
-/** Routes API computeRouteMatrix（出発地1つ × 到着地の一覧）。ルートが無い到着地は null */
+type RowElement = { seconds: number; meters: number } | 'no_route' | null;
+
+/**
+ * Routes API computeRouteMatrix（出発地1つ × 到着地の一覧）。
+ * ルートが無い到着地は 'no_route'、要素ごとのエラー・応答に無い到着地は null
+ */
 async function fetchRow(
   key: string,
   origin: LatLng,
   destinations: LatLng[],
   mode: TravelMode,
   departAtMs: number,
-): Promise<({ seconds: number; meters: number } | null)[]> {
-  const out: ({ seconds: number; meters: number } | null)[] = destinations.map(() => null);
+): Promise<RowElement[]> {
+  const out: RowElement[] = destinations.map(() => null);
   const wp = (p: LatLng) => ({ waypoint: { location: { latLng: { latitude: p.lat, longitude: p.lng } } } });
   const body: Record<string, unknown> = {
     origins: [wp(origin)],
@@ -160,7 +174,7 @@ async function fetchRow(
     headers: {
       'Content-Type': 'application/json',
       'X-Goog-Api-Key': key,
-      'X-Goog-FieldMask': 'originIndex,destinationIndex,duration,distanceMeters,condition',
+      'X-Goog-FieldMask': 'originIndex,destinationIndex,duration,distanceMeters,condition,status',
     },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(10000),
@@ -171,11 +185,17 @@ async function fetchRow(
     duration?: string;
     distanceMeters?: number;
     condition?: string;
+    status?: { code?: number };
   }[];
+  let elementErrors = 0;
   for (const r of rows) {
-    if (r.condition !== 'ROUTE_EXISTS') continue;
-    out[r.destinationIndex ?? 0] = { seconds: Number.parseInt(r.duration ?? '0', 10), meters: r.distanceMeters ?? 0 };
+    const j = r.destinationIndex ?? 0;
+    if (r.condition === 'ROUTE_EXISTS')
+      out[j] = { seconds: Number.parseInt(r.duration ?? '0', 10), meters: r.distanceMeters ?? 0 };
+    else if (r.condition === 'ROUTE_NOT_FOUND') out[j] = 'no_route';
+    else elementErrors++;
   }
+  if (elementErrors) logger.warn('travel_time.routes_api_element_errors', { count: elementErrors });
   return out;
 }
 

@@ -39,13 +39,15 @@ def read_rows(paths: Iterable[str]) -> list[dict]:
                 if not actual or actual <= 0:
                     continue
                 straight = num(r.get("直線距離m"))
+                # 地図APIが使えず概算になった区間は Google の値ではないので、Google 側を空にする
+                google_ok = "+fallback" not in (r.get("モデル版") or "")
                 rows.append(
                     {
                         "date": r["日付"],
                         "key": r["区分"],
                         "actual": actual,
-                        "google": num(r.get("基準秒")),
-                        "predicted": num(r.get("予測秒")),
+                        "google": num(r.get("基準秒")) if google_ok else None,
+                        "predicted": num(r.get("予測秒")) if google_ok else None,
                         "osrm": num(r.get("OSRM秒")),
                         "straight": straight,
                         "estimate": None if straight is None else straight * 1.3 / 1000 / 25 * 3600,
@@ -113,7 +115,12 @@ def report(rows: list[dict]) -> str:
         "",
     ]
     if not full:
-        return "\n".join([*lines, "比べられる区間がない（OSRM秒・直線距離m が空の区間は除外）"])
+        msg = "比べられる区間がない（OSRM秒・直線距離m が空、地図APIが概算だった区間は除外）"
+        return "\n".join([*lines, msg])
+    # 予測値は全区間で1回だけ求める（補正の倍率を節ごとに学習し直さない）
+    preds = {name: f(full) for name, f in METHODS}
+    for idx, r in enumerate(full):
+        r["pred"] = {name: p[idx] for name, p in preds.items()}
     groups: dict[str, list[dict]] = defaultdict(list)
     for r in full:
         groups[band(r)].append(r)
@@ -131,8 +138,8 @@ def report(rows: list[dict]) -> str:
             "|---|---|---|---|---|",
         ]
         actual = [r["actual"] for r in rs]
-        for name, f in METHODS:
-            m = metrics(f(rs), actual)
+        for name, _ in METHODS:
+            m = metrics([r["pred"][name] for r in rs], actual)
             cells = [f"{m['within10']:.1%}", f"{m['mae'] / 60:.1f}", f"{m['mape']:.1%}"]
             lines.append(f"| {name} | {' | '.join(cells)} | {m['bias'] / 60:+.1f} |")
         lines.append("")
