@@ -55,6 +55,7 @@ flowchart TB
     fn["業務関数［Cloud Functions for Firebase 2nd gen, TypeScript］<br/>招待・位置変換・移動時間・案の生成と比較・勤怠集計・CSV"]
     opt["最適化サービス［Cloud Functions 2nd gen, Python + OR-Tools］<br/>VRPTWを解く（状態を持たない）"]
     fcm["通知［Firebase Cloud Messaging］"]
+    osrm["経路エンジン［Cloud Run, OSRM + OpenStreetMap 仙台周辺］<br/>車の移動時間（比較用、ADR-0005）"]
   end
   maps["Google Maps Platform［外部］<br/>Geocoding / Routes API"]
   web -->|SDK: サインイン| auth
@@ -63,6 +64,7 @@ flowchart TB
   fn -->|Admin SDK| db
   fn -->|HTTPS/JSON（IAM認証）| opt
   fn -->|HTTPS| maps
+  fn -->|HTTPS/JSON（IAM認証）| osrm
   fn -->|HTTPS| fcm
   fcm -->|Web Push| web
 ```
@@ -137,13 +139,14 @@ flowchart LR
   - [ ] 決定済みの順番がない日は、手作業案をスタッフに見せる（1回目の実証）
 
 ### travel-time（移動時間予測AI）
-- 責務：区間（出発地→到着地・移動手段・時間帯）の**基準移動時間**を地図APIで取り、実測から作った補正で**予測移動時間**を返す。実測区間の収集と、補正モデルの学習・版管理。
-- 持つデータ（持ち主）：`legCache`（基準値、30日）、`travelModels`（補正係数表＝時間帯×曜日区分×移動手段×距離帯→倍率、学習に使った件数）、`legActuals`（実測区間＝前の退出→次の到着、予測値・基準値・モデル版つき）
+- 責務：区間（出発地→到着地・移動手段・時間帯）の**基準移動時間**を地図APIで取り、実測から作った補正で**予測移動時間**を返す。地図APIに聞くのは各地点の近傍10地点との区間だけで、残りは直線距離の概算を実測で補正して埋める（ADR-0004）。実測区間の収集と、補正モデルの学習・版管理。
+- 持つデータ（持ち主）：`legCache`（基準値、30日。キーは区間×移動手段×時間帯。ルートなしも記録）、`travelModels`（補正係数表＝時間帯×曜日区分×移動手段×距離帯→倍率、学習に使った件数）、`legActuals`（実測区間＝前の退出→次の到着、予測値・基準値・モデル版・OSRMの値・直線距離つき）
 - 提供するAPI：内部関数 `predictMatrix(points, mode, departBand) → {seconds[][], meters[][], modelVersion}`（planning から呼ぶ）、`trainModel()`（Callable、運営者のみ。α は係数表、改で1回目の実データから再学習）。
-- 依存するもの：Google Routes API（Compute Route Matrix）、field（実測の到着・退出）。
+- 依存するもの：Google Routes API（Compute Route Matrix）、経路エンジン（OSRM。実測区間の比較値だけ。予測には使わない）、field（実測の到着・退出）。
 - 配置：`functions/src/modules/travel-time/`、学習ノートブックは `analysis/`
 - 完了の条件：
   - [ ] 同じ区間は30日間キャッシュから返し、地図APIを呼ばない
+  - [ ] 地図APIに聞くのはキャッシュに無い近傍の区間だけで、1回の行列作成で1,000要素を超えない
   - [ ] 実測区間に予測値・基準値・モデル版が残り、誤差±10分以内の割合を集計できる
   - [ ] モデル版を指定すると同じ入力から同じ予測が返る
 
@@ -298,6 +301,8 @@ optimizer の「守れない訪問がある」はエラーではなく、成功�
 | 位置計測 | PWA の前景計測＋ボタン時点（ADR-0002） | ネイティブアプリ（Capacitor）でバックグラウンド計測 | 配布・審査・工数。精度不足が1回目で分かれば改修で Capacitor 化を検討 |
 | ジオフェンス判定 | 端末側（位置と訪問先の距離） | サーバー側で位置サンプルから判定 | オフラインでも即時に候補を出せる。サーバーは訂正・承認の正を持つ |
 | 移動時間予測 | 地図APIの基準×補正係数表（α）→ 実データで回帰（改） | 最初から機械学習モデル | 学習データ（実測区間）は1回目で初めて溜まる。係数表なら版管理と再現が簡単 |
+| 移動時間行列 | 近傍の区間だけ地図APIで実測、残りは概算（ADR-0004） | 全区間を地図APIで取る／OSRM（OpenStreetMap）で自前に作る | 課金を n² から約 n×k に下げる。遠い区間は最適解にまず入らない。OSRM は実測区間で比べてから決める（ADR-0005） |
+| 基準値の比較用エンジン | OSRM 仙台版（車のみ、ADR-0005） | Valhalla | 渋滞の速度データを自前で用意しない限り精度が変わらない。OSRM の方が軽い |
 | 画面からの書き込み | マスタ・予定・記録はSDK直接、判定・計算は関数 | すべて関数経由 | 工数とオフライン対応。ルールで型と持ち主を検査する |
 
 ## 8. 未決事項

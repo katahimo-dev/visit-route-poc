@@ -59,10 +59,19 @@ pnpm test:rules    # セキュリティルール（エミュレーター）
 2. `firebase use <project>`、Secret Manager に `MAPS_SERVER_KEY`（Routes API・Geocoding API を有効化したサーバー用キー）。
 3. `firebase deploy --only functions:optimizer` → 出てきた URL を `functions/.env.<project>` の `OPTIMIZER_URL` に書く。
    最適化サービスは `invoker="private"`。業務関数のサービスアカウント（既定は `<project-number>-compute@developer.gserviceaccount.com`）に、その Cloud Run サービスの `roles/run.invoker` を付ける。
+   比較用の OSRM 仙台版（ADR-0005）：`osrm/deploy.sh <project>` → 出てきた `OSRM_URL` を同じファイルに書く。書かなければ比較値は残さない。
 4. `web/.env.production.local` に Firebase の Web 設定を書き、`pnpm --filter web build`。
 5. `firebase deploy --only firestore,functions:default,hosting`。
 6. 事業所の開設：`GCLOUD_PROJECT=<project> pnpm org:create -- <orgId> <事業所名> <sitter|care|nursing|other> <管理者メール> [--operator <運営者メール>]`。
    スタッフは管理者画面で登録して「招待」すると、本人がアプリを開いてログインメールを受け取れる。
+
+## 移動時間の比較（分析）
+
+実証データCSV（`移動時間_予測と実測_<期間>.csv`）を渡すと、直線距離の概算・Google・OSRM・それぞれ×補正を実測と比べた表を出す（ADR-0005）。
+
+```bash
+python3 analysis/compare_travel_time.py 移動時間_予測と実測_*.csv
+```
 
 ## 既知の制約（α版）
 
