@@ -10,3 +10,5 @@ allowBuilds:
   esbuild: false
   protobufjs: false
   '@firebase/util': false
+  # firebase-tools の任意依存。ネイティブビルドしなくても CLI は動く
+  re2: false
