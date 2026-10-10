@@ -67,7 +67,21 @@ export const exportStudyData = onCall({ region: REGION, timeoutSeconds: 120 }, a
     ],
   ];
   const legs: (string | number | null)[][] = [
-    ['事業所', '日付', 'スタッフ', '移動手段', '区分', 'モデル版', '基準秒', '予測秒', '実測秒', '誤差秒', '補完あり'],
+    [
+      '事業所',
+      '日付',
+      'スタッフ',
+      '移動手段',
+      '区分',
+      'モデル版',
+      '基準秒',
+      '予測秒',
+      '実測秒',
+      '誤差秒',
+      '補完あり',
+      'OSRM秒',
+      '直線距離m',
+    ],
   ];
   const visits: (string | number | null)[][] = [
     [
@@ -151,6 +165,8 @@ export const exportStudyData = onCall({ region: REGION, timeoutSeconds: 120 }, a
         actual,
         pred - actual,
         a.filled ? 1 : 0,
+        typeof a.osrmSeconds === 'number' ? a.osrmSeconds : null,
+        typeof a.straightMeters === 'number' ? a.straightMeters : null,
       ]);
     }
     // T1/T2：その訪問について最初に開いた時刻

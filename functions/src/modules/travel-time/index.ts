@@ -1,6 +1,7 @@
 import {
   type AttendanceDay,
   type Client,
+  distanceMeters,
   hhmmToMinutes,
   jstHhmm,
   type LatLng,
@@ -21,8 +22,9 @@ import {
   trainFactors,
 } from './domain/predict';
 import { baseMatrix, MAPS_SERVER_KEY } from './infrastructure/maps';
+import { OSRM_URL, osrmLeg } from './infrastructure/osrm';
 
-export { MAPS_SERVER_KEY };
+export { MAPS_SERVER_KEY, OSRM_URL };
 
 /** 事業所の最新の補正モデル（無ければ倍率1.0） */
 export async function currentModel(orgId: string): Promise<TravelModel> {
@@ -100,17 +102,13 @@ export const onAttendanceDayWritten = onDocumentWritten(
       const b = places[i];
       if (!a?.lat || !a.lng || !b?.lat || !b.lng) continue;
       const departAt = prev.depart ?? prev.end!;
-      const pm = await predictMatrix(
-        orgId,
-        [
-          { lat: a.lat, lng: a.lng },
-          { lat: b.lat, lng: b.lng },
-        ],
-        mode,
-        day.date,
-        departAt,
-        model,
-      );
+      const from = { lat: a.lat, lng: a.lng };
+      const to = { lat: b.lat, lng: b.lng };
+      // OSRM（OpenStreetMap）の値は比較用に並べて残すだけで、予測には使わない（ADR-0005）
+      const [pm, osrm] = await Promise.all([
+        predictMatrix(orgId, [from, to], mode, day.date, departAt, model),
+        osrmLeg(from, to, mode),
+      ]);
       batch.set(col(orgId, 'legActuals').doc(`${day.staffId}_${day.date}_${i}`), {
         staffId: day.staffId,
         date: day.date,
@@ -123,6 +121,9 @@ export const onAttendanceDayWritten = onDocumentWritten(
         predictedSeconds: pm.seconds[0]![1]!,
         baseSeconds: pm.baseSeconds[0]![1]!,
         modelVersion: pm.modelVersion,
+        osrmSeconds: osrm?.seconds ?? null,
+        osrmMeters: osrm?.meters ?? null,
+        straightMeters: Math.round(distanceMeters(from, to)),
         filled: cur.v.arriveFilled || prev.depart === null,
       });
     }
