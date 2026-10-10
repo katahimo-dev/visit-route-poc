@@ -138,7 +138,13 @@ export default function ClientsPage() {
                   </td>
                   <td>{c.active ? '' : <span className="chip">休止中</span>}</td>
                   <td>
-                    <button type="button" className="btn btn-small" onClick={() => edit(c)}>
+                    <button
+                      type="button"
+                      className="btn btn-small"
+                      // NG スタッフを読み込む前に保存すると空で上書きするので、読み込むまで押せない
+                      disabled={privateQ.rows === null}
+                      onClick={() => edit(c)}
+                    >
                       直す
                     </button>
                   </td>

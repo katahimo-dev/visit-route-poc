@@ -39,7 +39,7 @@ async function recompute(orgId: string, staffId: string, date: string): Promise<
     const prev = await tx.get(ref);
     const prevDay = prev.exists ? (prev.data() as AttendanceDay) : null;
     const day = buildAttendanceDay(staffId, date, planned, events, prevDay);
-    // 結果が変わらない記録（顧客情報を開いた等）では書かない。書くと onAttendanceDayWritten の連鎖が起きる
+    // 結果が変わらない記録（勤怠に関係しない記録など）では書かない。書くと onAttendanceDayWritten の連鎖が起きる
     if (prevDay && sameDay(prevDay, day)) return;
     tx.set(ref, day);
   });

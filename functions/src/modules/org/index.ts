@@ -37,7 +37,7 @@ export const inviteMember = onCall({ region: REGION }, async (req) => {
     // 別の人に付け替えるときは、前の人のクレームを外してログインを切る（onStaffUpdated でも外す）
     const prevUid = (staffSnap?.data() as Staff | undefined)?.uid ?? null;
     await staffRef.update({ uid: user.uid });
-    if (prevUid && prevUid !== user.uid) await revokeMember(prevUid, orgId);
+    if (prevUid && prevUid !== user.uid) await revokeMember(prevUid, orgId, staffRef.id);
   }
   logger.info('org.member_invited', { orgId, uid: user.uid, role: input.role });
   return { uid: user.uid };
@@ -47,16 +47,21 @@ export const inviteMember = onCall({ region: REGION }, async (req) => {
  * メンバーのクレームを外し、リフレッシュトークンを無効にする（退職・付け替え）。
  * すでに発行済みの ID トークン（最長1時間）は firestore.rules がスタッフ文書の active と uid で止める。
  */
-async function revokeMember(uid: string, orgId: string): Promise<void> {
+async function revokeMember(uid: string, orgId: string, staffId: string): Promise<void> {
   const auth = getAuth();
   const user = await auth.getUser(uid).catch(() => null);
-  if (!user || user.customClaims?.orgId !== orgId || user.customClaims?.role !== 'staff') return;
+  // すでに別のスタッフに付け替え済みの人（クレームの staffId が違う）は外さない
+  const claims = user?.customClaims;
+  if (!user || claims?.orgId !== orgId || claims?.role !== 'staff' || claims?.staffId !== staffId) return;
   await auth.setCustomUserClaims(uid, null);
   await auth.revokeRefreshTokens(uid);
   logger.info('org.member_revoked', { orgId, uid });
 }
 
-/** スタッフを休止（active=false）にした・uid を外したら、そのアカウントのログインを切る */
+/**
+ * スタッフを休止にした（active が false に変わった）・uid を付け替えたら、そのアカウントのログインを切る。
+ * 休止のままの編集では切らない（休止中に招待し直した人を、続く編集で切らないため）
+ */
 export const onStaffUpdated = onDocumentUpdated(
   { document: 'orgs/{orgId}/staff/{staffId}', region: REGION },
   async (e) => {
@@ -64,7 +69,8 @@ export const onStaffUpdated = onDocumentUpdated(
     const after = e.data?.after.data() as Staff | undefined;
     const uid = before?.uid;
     if (!uid) return;
-    if (after?.active === false || after?.uid !== uid) await revokeMember(uid, e.params.orgId);
+    const deactivated = before?.active !== false && after?.active === false;
+    if (deactivated || after?.uid !== uid) await revokeMember(uid, e.params.orgId, e.params.staffId);
   },
 );
 
