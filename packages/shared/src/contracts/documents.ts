@@ -40,6 +40,8 @@ export const orgSchema = z.object({
   geofenceMeters: z.number().int().min(30).max(500),
   showAiToStaff: z.boolean(),
   fareYenPerKm: z.number().min(0).max(1000),
+  /** デモ用の架空の事業所（seedDemo だけが付ける）。デモ用ログインはこの印のある事業所にしか入れない */
+  demo: z.boolean().optional(),
 });
 export type Org = z.infer<typeof orgSchema>;
 

@@ -1,4 +1,4 @@
-import { demoSignInRequest, requestLoginCodeRequest, type Staff, verifyLoginCodeRequest } from '@vrp/shared';
+import { demoSignInRequest, type Org, requestLoginCodeRequest, type Staff, verifyLoginCodeRequest } from '@vrp/shared';
 import { getAuth } from 'firebase-admin/auth';
 import { Timestamp } from 'firebase-admin/firestore';
 import { defineString } from 'firebase-functions/params';
@@ -29,8 +29,6 @@ export const DEMO_ORG_ID = defineString('DEMO_ORG_ID', { default: '' });
 
 const codes = () => db.collection('loginCodes');
 const isEmulator = process.env.FUNCTIONS_EMULATOR === 'true';
-/** デモの環境か（プロジェクト ID に demo を含む。seedDemo と同じ守り） */
-const isDemoProject = () => (process.env.GCLOUD_PROJECT ?? '').includes('demo');
 /**
  * 消す日時（Firestore の TTL ポリシーで消える。README）。
  * コードの文書は送信・間違いの履歴を24時間使うので1日、メールは送り終わった後に残さないよう1日
@@ -153,10 +151,11 @@ export const revokeInactiveSessions = onSchedule(
  */
 export const demoSignIn = onCall({ region: REGION }, async (req) => {
   const orgId = DEMO_ORG_ID.value();
-  // 設定の誤り（本番に DEMO_ORG_ID を書いた等）で本番の事業所に入れないよう、プロジェクト ID でも確かめる
-  if (!orgId || !isDemoProject()) throw new HttpsError('permission-denied', 'デモは使えません');
+  if (!orgId) throw new HttpsError('permission-denied', 'デモは使えません');
   const { as } = parse(demoSignInRequest, req.data);
-  if (!(await orgDoc(orgId).get()).exists) throw new HttpsError('not-found', 'デモの事業所がありません');
+  // 設定の誤り（実在の事業所の ID を書いた等）で実データに入れないよう、デモの印（seedDemo が付ける）を確かめる
+  const org = (await orgDoc(orgId).get()).data() as Org | undefined;
+  if (org?.demo !== true) throw new HttpsError('permission-denied', 'デモは使えません');
   const auth = getAuth();
   const ensure = async (uid: string, claims: Record<string, string>) => {
     await auth.getUser(uid).catch(() => auth.createUser({ uid, displayName: 'デモ' }));

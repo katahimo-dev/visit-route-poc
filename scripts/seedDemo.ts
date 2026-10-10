@@ -3,7 +3,8 @@
  *   pnpm seed   （firebase emulators:start の起動中に）
  * ログイン：admin@example.com（管理者）/ staff1@example.com（スタッフ）/ operator@example.com（運営者）
  * ログインコードはエミュレーターの関数ログ（http://localhost:4000/logs）に表示される。
- * デモ用のプロジェクトに入れるとき：SEED_PROJECT=<プロジェクトID> pnpm seed（ID に demo を含むものだけ）
+ * 実証用のプロジェクトに入れるとき（デモ期間）：SEED_PROJECT=<プロジェクトID> pnpm seed
+ *   事業所 demo にだけ書く。デモの印の無い事業所 demo（実データ）があれば止まる。片付けは scripts/endDemo.ts
  * 予定は実行日から SEED_UNTIL（既定 2026-11-30）まで毎日入る（土日も営業）。日ごとに少しずつ変える。
  */
 import {
@@ -24,10 +25,6 @@ import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
 
 const target = process.env.SEED_PROJECT;
-if (target && !target.includes('demo')) {
-  console.error('デモデータを入れられるのは、ID に demo を含むプロジェクトだけです（本番に入れないため）');
-  process.exit(1);
-}
 if (!target && !process.env.FIRESTORE_EMULATOR_HOST) {
   process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080';
   process.env.FIREBASE_AUTH_EMULATOR_HOST = '127.0.0.1:9099';
@@ -45,7 +42,15 @@ const org: Org = {
   geofenceMeters: 100,
   showAiToStaff: false,
   fareYenPerKm: 10,
+  demo: true,
 };
+
+// 実データの事業所 demo を上書きしない
+const existing = (await db.doc(`orgs/${orgId}`).get()).data() as Org | undefined;
+if (existing && existing.demo !== true) {
+  console.error('事業所 demo にデモの印がありません（実データの可能性）。中止します');
+  process.exit(1);
+}
 
 /**
  * スタッフ・訪問先は、仙台市の公共施設を擬人化した架空の人物（住所・位置は施設のおおよその場所）。
