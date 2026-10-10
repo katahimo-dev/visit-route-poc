@@ -1,8 +1,15 @@
 import { DEFAULT_TERMS, type Org, type Role, type Terms } from '@vrp/shared';
 import { onIdTokenChanged, signOut, type User } from 'firebase/auth';
-import { clearIndexedDbPersistence, doc, onSnapshot, terminate, waitForPendingWrites } from 'firebase/firestore';
+import { doc, onSnapshot, waitForPendingWrites } from 'firebase/firestore';
 import { createContext, type ReactNode, useContext, useEffect, useState } from 'react';
-import { auth, CACHE_KEY, db, persistent } from './firebase';
+import { auth, CACHE_KEY, CLEAR_KEY, db, persistent } from './firebase';
+
+/** 端末のデータを消して読み込み直す（消すのは次の起動時、SDK を使う前。firebase.ts） */
+function clearAndReload(): void {
+  localStorage.removeItem(CACHE_KEY);
+  localStorage.setItem(CLEAR_KEY, '1');
+  location.reload();
+}
 
 export type Session = {
   user: User;
@@ -25,12 +32,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       unsubOrg?.();
       unsubOrg = null;
       if (!user) {
-        // ログアウト・再認証切れ（使わなかった日数が過ぎた等）。端末に残ったデータを消す
+        // ログアウト・再認証切れ（使わなかった日数が過ぎた等）。端末に残ったデータを消す。
+        // 未送信の記録は、ログインしていない状態ではルールで拒まれ送れないので、残しても意味がない
         if (persistent) {
-          localStorage.removeItem(CACHE_KEY);
-          await terminate(db);
-          await clearIndexedDbPersistence(db).catch(() => undefined);
-          location.reload();
+          setState({ loading: true, session: null });
+          clearAndReload();
           return;
         }
         setState({ loading: false, session: null });
@@ -40,10 +46,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       const role = (claims.role as Role | undefined) ?? null;
       // スタッフだけ端末に保存する。前回と違えば設定を変えて読み込み直す（firebase.ts）
       const wantPersistent = role === 'staff';
-      if (wantPersistent !== persistent) {
-        if (wantPersistent) localStorage.setItem(CACHE_KEY, '1');
-        else localStorage.removeItem(CACHE_KEY);
-        location.reload();
+      if (wantPersistent !== persistent && !localStorage.getItem(CLEAR_KEY)) {
+        if (wantPersistent) {
+          localStorage.setItem(CACHE_KEY, '1');
+          location.reload();
+        } else clearAndReload();
         return;
       }
       const orgId = (claims.orgId as string | undefined) ?? null;

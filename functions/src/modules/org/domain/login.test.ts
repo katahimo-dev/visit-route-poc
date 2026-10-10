@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { CODE_TTL_MS, canSend, issue, loginCodeId, MAX_ATTEMPTS, newCode, shouldRevoke, verify } from './login';
+import {
+  CODE_TTL_MS,
+  canSend,
+  failed,
+  issue,
+  loginCodeId,
+  MAX_ATTEMPTS,
+  MAX_FAILURES_PER_DAY,
+  newCode,
+  shouldRevoke,
+  verify,
+} from './login';
 
 const now = Date.parse('2026-10-20T00:00:00Z');
 const day = 86400000;
@@ -25,6 +36,14 @@ describe('ログインコード', () => {
     const second = issue(first, '222222', now + 61000);
     expect(verify(second, '111111', now + 62000)).toBe('wrong');
     expect(second.attempts).toBe(0);
+  });
+  it('24時間に間違いが多すぎたら、コードを出さず照合もしない（新しいコードを出しても引き継ぐ）', () => {
+    let doc = issue(null, '123456', now);
+    for (let i = 0; i < MAX_FAILURES_PER_DAY; i++) doc = { ...doc, ...failed(doc, now + i) };
+    const next = issue(doc, '123456', now + 1000);
+    expect(canSend(next, now + 3600_000)).toBe(false);
+    expect(verify(next, '123456', now + 2000)).toBe('expired');
+    expect(canSend(next, now + 86400_000 + 1000)).toBe(true);
   });
   it('送信は60秒あけ、1時間に5回まで', () => {
     let doc = issue(null, '000000', now);

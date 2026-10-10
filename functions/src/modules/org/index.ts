@@ -6,6 +6,7 @@ import { onDocumentUpdated } from 'firebase-functions/v2/firestore';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import { callerOf, col, orgDoc, parse, REGION, requireManager } from '../../lib/context';
 import { geocode, MAPS_SERVER_KEY } from '../travel-time/infrastructure/maps';
+import { DEMO_ORG_ID } from './login';
 
 /**
  * メンバーを招待する。Firebase Auth にユーザーを作り（無ければ）、事業所とロールをクレームに付ける。
@@ -14,6 +15,9 @@ import { geocode, MAPS_SERVER_KEY } from '../travel-time/infrastructure/maps';
 export const inviteMember = onCall({ region: REGION }, async (req) => {
   const c = callerOf(req);
   const input = parse(inviteMemberRequest, req.data);
+  // デモの環境では招待しない（誰でも管理者になれるので、他人のアドレスを登録させない）
+  if (DEMO_ORG_ID.value() && process.env.FUNCTIONS_EMULATOR !== 'true')
+    throw new HttpsError('permission-denied', 'デモでは招待できません');
   const orgId = requireManager(c, input.orgId);
   if (!(await orgDoc(orgId).get()).exists) throw new HttpsError('not-found', '事業所がありません');
   if (input.role === 'staff' && !input.staffId) throw new HttpsError('invalid-argument', 'スタッフを選んでください');

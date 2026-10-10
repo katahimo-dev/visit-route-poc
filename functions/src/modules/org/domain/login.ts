@@ -9,6 +9,8 @@ export const MAX_ATTEMPTS = 5;
 /** 同じアドレスへの送信：前回から60秒あける、1時間に5回まで */
 export const RESEND_INTERVAL_MS = 60 * 1000;
 export const MAX_SENDS_PER_HOUR = 5;
+/** 1アドレスで24時間に間違えてよい回数。超えたら24時間はコードを出さず、照合もしない（総当たり対策） */
+export const MAX_FAILURES_PER_DAY = 15;
 
 export type LoginCodeDoc = {
   codeHash: string;
@@ -17,6 +19,8 @@ export type LoginCodeDoc = {
   attempts: number;
   /** 直近1時間の送信時刻 */
   sentAt: number[];
+  /** 直近24時間に間違えた時刻 */
+  failedAt?: number[];
 };
 
 /** コードの文書ID（メールアドレスをそのまま ID にしない） */
@@ -41,7 +45,22 @@ export function issue(prev: LoginCodeDoc | null, code: string, now: number): Log
     expiresAt: now + CODE_TTL_MS,
     attempts: 0,
     sentAt: [...recentSends(prev, now), now],
+    failedAt: recentFailures(prev, now),
   };
+}
+
+function recentFailures(doc: LoginCodeDoc | null, now: number): number[] {
+  return (doc?.failedAt ?? []).filter((t) => now - t < 86400_000);
+}
+
+/** 間違いが多すぎてロック中か */
+export function locked(doc: LoginCodeDoc | null, now: number): boolean {
+  return recentFailures(doc, now).length >= MAX_FAILURES_PER_DAY;
+}
+
+/** 間違えたあとの文書 */
+export function failed(doc: LoginCodeDoc, now: number): Pick<LoginCodeDoc, 'attempts' | 'failedAt'> {
+  return { attempts: doc.attempts + 1, failedAt: [...recentFailures(doc, now), now] };
 }
 
 function recentSends(doc: LoginCodeDoc | null, now: number): number[] {
@@ -51,7 +70,7 @@ function recentSends(doc: LoginCodeDoc | null, now: number): number[] {
 /** 送ってよいか（連打・乱発を防ぐ） */
 export function canSend(doc: LoginCodeDoc | null, now: number): boolean {
   const sends = recentSends(doc, now);
-  if (sends.length >= MAX_SENDS_PER_HOUR) return false;
+  if (sends.length >= MAX_SENDS_PER_HOUR || locked(doc, now)) return false;
   return sends.every((t) => now - t >= RESEND_INTERVAL_MS);
 }
 
@@ -59,7 +78,7 @@ export type VerifyResult = 'ok' | 'wrong' | 'expired';
 
 /** コードを確かめる。期限切れ・試行回数の上限は expired（新しいコードを送ってもらう） */
 export function verify(doc: LoginCodeDoc | null, code: string, now: number): VerifyResult {
-  if (!doc || doc.expiresAt <= now || doc.attempts >= MAX_ATTEMPTS) return 'expired';
+  if (!doc || doc.expiresAt <= now || doc.attempts >= MAX_ATTEMPTS || locked(doc, now)) return 'expired';
   const a = Buffer.from(hashCode(code, doc.salt), 'hex');
   const b = Buffer.from(doc.codeHash, 'hex');
   return a.length === b.length && timingSafeEqual(a, b) ? 'ok' : 'wrong';

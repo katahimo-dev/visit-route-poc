@@ -4,14 +4,30 @@ import { call, messageOf } from '../../lib/api';
 import { auth } from '../../lib/firebase';
 
 const EMAIL_KEY = 'vrp.signInEmail';
+/** コード入力の途中か（メールを見に行っている間にアプリが読み込み直されても戻れるように） */
+const STEP_KEY = 'vrp.loginStep';
 /** デモ用のログインボタンを出すか（デモ用のプロジェクトのビルドだけ true） */
 const DEMO = import.meta.env.VITE_DEMO_LOGIN === 'true';
+
+class LoginError extends Error {}
+
+async function signIn(token: string): Promise<void> {
+  await signInWithCustomToken(auth, token).catch(() => {
+    throw new LoginError('ログインできませんでした。電波のよい場所でもう一度お試しください');
+  });
+}
 
 /** メールに届く6桁のコードでログイン（アプリから出ずにログインできる。ADR-0007） */
 export function LoginPage() {
   const [email, setEmail] = useState(localStorage.getItem(EMAIL_KEY) ?? '');
   const [code, setCode] = useState('');
-  const [step, setStep] = useState<'email' | 'code'>('email');
+  const [step, setStepState] = useState<'email' | 'code'>(
+    sessionStorage.getItem(STEP_KEY) === 'code' ? 'code' : 'email',
+  );
+  const setStep = (s: 'email' | 'code') => {
+    sessionStorage.setItem(STEP_KEY, s);
+    setStepState(s);
+  };
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -21,7 +37,7 @@ export function LoginPage() {
     try {
       await fn();
     } catch (e) {
-      setError(messageOf(e));
+      setError(e instanceof LoginError ? e.message : messageOf(e));
     } finally {
       setBusy(false);
     }
@@ -38,13 +54,14 @@ export function LoginPage() {
   const verify = () =>
     run(async () => {
       const { token } = await call('verifyLoginCode', { email, code });
-      await signInWithCustomToken(auth, token);
+      await signIn(token);
+      sessionStorage.removeItem(STEP_KEY);
     });
 
   const demo = (as: 'admin' | 'staff') =>
     run(async () => {
       const { token } = await call('demoSignIn', { as });
-      await signInWithCustomToken(auth, token);
+      await signIn(token);
     });
 
   return (
@@ -61,6 +78,9 @@ export function LoginPage() {
               コードを送る
             </button>
             <p className="sub">メールに届く6桁の数字を、この画面に入力するとログインできます。</p>
+            <button type="button" className="btn" disabled={!email || busy} onClick={() => setStep('code')}>
+              届いたコードを入力する
+            </button>
           </>
         ) : (
           <>

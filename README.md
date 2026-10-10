@@ -58,6 +58,9 @@ pnpm test:rules    # セキュリティルール（エミュレーター）
 1. Firebase プロジェクトを作り（Blaze）、Authentication を有効にする。リージョンは asia-northeast1。
    ログインはメールの6桁コード（ADR-0007）。メールは拡張機能 Trigger Email（`firebase ext:install firebase/firestore-send-email`、コレクション `mail`、SMTP は事業者のものを設定）で送る。
    業務関数のサービスアカウントに、自分自身への `roles/iam.serviceAccountTokenCreator` を付ける（ログイン用トークンの署名に使う）。
+   Authentication の「メールリンク」は無効のままにする（使わない）。
+   Firestore の TTL ポリシーを `loginCodes` と `mail` の `expireAt` に設定する（コード・送信済みメールを1日で消す）：
+   `gcloud firestore fields ttls update expireAt --collection-group=loginCodes --enable-ttl`（`mail` も同様）
 2. `firebase use <project>`、Secret Manager に `MAPS_SERVER_KEY`（Routes API・Geocoding API を有効化したサーバー用キー）。
 3. `firebase deploy --only functions:optimizer` → 出てきた URL を `functions/.env.<project>` の `OPTIMIZER_URL` に書く。
    最適化サービスは `invoker="private"`。業務関数のサービスアカウント（既定は `<project-number>-compute@developer.gserviceaccount.com`）に、その Cloud Run サービスの `roles/run.invoker` を付ける。
@@ -66,7 +69,7 @@ pnpm test:rules    # セキュリティルール（エミュレーター）
 5. `firebase deploy --only firestore,functions:default,hosting`。
 6. 事業所の開設：`GCLOUD_PROJECT=<project> pnpm org:create -- <orgId> <事業所名> <sitter|care|nursing|other> <管理者メール> [--operator <運営者メール>]`。
    スタッフは管理者画面で登録して「招待」すると、本人がアプリを開いてログインコードを受け取れる。
-7. デモ環境（画面説明・お試し用）は本番と別のプロジェクト（ID に demo を含む）に作る。`functions/.env.<project>` に `DEMO_ORG_ID=demo`、`web/.env.production.local` に `VITE_DEMO_LOGIN=true`、データは `SEED_PROJECT=<project> pnpm seed`（予定は実行日のきょう・あしたに入るので、見せる日の朝に入れ直す）。地図APIのキーは設定しない（直線距離の概算で動く）。
+7. デモ環境（画面説明・お試し用）は本番と別のプロジェクト（ID に demo を含む）に作る。`functions/.env.<project>` に `DEMO_ORG_ID=demo`、`web/.env.production.local` に `VITE_DEMO_LOGIN=true`、データは `SEED_PROJECT=<project> pnpm seed`（予定は実行日のきょう・あしたに入るので、見せる日の朝に入れ直す）。地図APIのキーは設定しない（直線距離の概算で動く）。Trigger Email も入れない（デモではコードのログイン・招待は止まる）。
 
 ## 移動時間の比較（分析）
 
