@@ -1,0 +1,2 @@
+# Windows で取得しても LF のまま（biome のフォーマット検査が改行コードで落ちないように）
+* text=auto eol=lf

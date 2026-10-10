@@ -55,6 +55,12 @@ pnpm test:rules    # セキュリティルール（エミュレーター）
 
 ## デプロイ（実証用プロジェクト）
 
+実証用のプロジェクトは `corded-academy-502703-f5`（`.firebaserc`）。`OPTIMIZER_URL` は `functions/.env.corded-academy-502703-f5`。
+
+- Node は 22 を使う。Node 26 では HTTPS_PROXY がある環境で firebase-tools の通信が失敗する（`invalid onError method`）。
+- HTTPS_PROXY がある環境では、`firebase deploy` にも `NODE_OPTIONS=--require=$(pwd)/scripts/dev/honor-no-proxy.cjs` を付ける（付けないと関数の読み込みがタイムアウトする）。
+- optimizer のデプロイには `optimizer/venv`（`python -m venv venv` → `venv` の pip で `requirements.txt`）が要る。アップロードからは除外している（firebase.json の `ignore`）。
+
 1. Firebase プロジェクトを作り（Blaze）、Authentication を有効にする。リージョンは asia-northeast1。
    ログインはメールの6桁コード（ADR-0007）。メールは拡張機能 Trigger Email（`firebase ext:install firebase/firestore-send-email`、コレクション `mail`、SMTP は事業者のものを設定）で送る。
    業務関数のサービスアカウントに、自分自身への `roles/iam.serviceAccountTokenCreator` を付ける（ログイン用トークンの署名に使う）。
