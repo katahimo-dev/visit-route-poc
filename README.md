@@ -75,7 +75,24 @@ pnpm test:rules    # セキュリティルール（エミュレーター）
 5. `firebase deploy --only firestore,functions:default,hosting`。
 6. 事業所の開設：`GCLOUD_PROJECT=<project> pnpm org:create -- <orgId> <事業所名> <sitter|care|nursing|other> <管理者メール> [--operator <運営者メール>]`。
    スタッフは管理者画面で登録して「招待」すると、本人がアプリを開いてログインコードを受け取れる。
-7. デモ環境（画面説明・お試し用）は本番と別のプロジェクト（ID に demo を含む）に作る。`functions/.env.<project>` に `DEMO_ORG_ID=demo`、`web/.env.production.local` に `VITE_DEMO_LOGIN=true`、データは `SEED_PROJECT=<project> pnpm seed`（予定は実行日から `SEED_UNTIL`（既定 2026-11-30）まで毎日入る。土日はスタッフ1人で3件）。地図APIのキーは設定しない（直線距離の概算で動く）。Trigger Email も入れない（デモではコードのログイン・招待は止まる）。
+7. 下の「デモ期間から本番への切り替え」の順に進める。
+
+## デモ期間から本番への切り替え（ADR-0007）
+
+実証用プロジェクトは、まずデモ（架空の事業所）で画面を見てもらい、指摘を直してから、デモを外して協力法人の実データで検証する。
+
+**デモ期間**（今の設定）
+- `functions/.env.corded-academy-502703-f5` に `DEMO_ORG_ID=demo`。画面は `web/.env.production.local` に `VITE_DEMO_LOGIN=true` を書いてビルド
+- データ：`SEED_PROJECT=corded-academy-502703-f5 pnpm seed`（GOOGLE_APPLICATION_CREDENTIALS か gcloud の ADC で）。予定は実行日から `SEED_UNTIL`（既定 2026-11-30）まで毎日入る（土日はスタッフ1人で3件）。入れ直しても記録は消えない
+- ログイン画面の「デモで試す（スタッフ／管理者）」で、メールなしで入れる。デモの印（`demo: true`）のある事業所にしか入れない
+- この間は招待が止まり、コードのログインは運営者だけになる（誰でも管理者になれるので、他人のアドレスへの送信の踏み台にしない）。地図APIのキーは無くてよい（移動時間は直線距離の概算）
+- 運営者の作業（実証データの CSV 出力など）をデモ期間中にするなら Trigger Email を用意する。用意しなければ、運営者の作業は切り替え後に行う
+
+**本番への切り替え**（デモの評価と調整が終わってから）
+1. `GCLOUD_PROJECT=corded-academy-502703-f5 pnpm tsx scripts/endDemo.ts` で消す対象を確かめ、`--apply` を付けて実行（デモの事業所と、デモ・@example.com のアカウントを消す）
+2. `functions/.env.corded-academy-502703-f5` から `DEMO_ORG_ID` を消し、`VITE_DEMO_LOGIN` を外して画面をビルド
+3. 上の手順1・2（Trigger Email・TTL・トークン署名の権限、`MAPS_SERVER_KEY`）を用意して `firebase deploy`
+4. `pnpm org:create` で協力法人の事業所を作り、管理者を招待する
 
 ## 移動時間の比較（分析）
 
