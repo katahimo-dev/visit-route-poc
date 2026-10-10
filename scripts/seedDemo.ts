@@ -2,7 +2,8 @@
  * エミュレーター用のデモデータ（仙台市内の架空の事業所）。本番では実行しない。
  *   pnpm seed   （firebase emulators:start の起動中に）
  * ログイン：admin@example.com（管理者）/ staff1@example.com（スタッフ）/ operator@example.com（運営者）
- * メールリンクはエミュレーターUI（http://localhost:4000/auth）に表示される。
+ * ログインコードはエミュレーターの関数ログ（http://localhost:4000/logs）に表示される。
+ * デモ用のプロジェクトに入れるとき：SEED_PROJECT=<プロジェクトID> pnpm seed（ID に demo を含むものだけ）
  */
 import {
   addDays,
@@ -18,11 +19,16 @@ import { initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
 
-if (!process.env.FIRESTORE_EMULATOR_HOST) {
+const target = process.env.SEED_PROJECT;
+if (target && !target.includes('demo')) {
+  console.error('デモデータを入れられるのは、ID に demo を含むプロジェクトだけです（本番に入れないため）');
+  process.exit(1);
+}
+if (!target && !process.env.FIRESTORE_EMULATOR_HOST) {
   process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080';
   process.env.FIREBASE_AUTH_EMULATOR_HOST = '127.0.0.1:9099';
 }
-initializeApp({ projectId: 'demo-visit-route' });
+initializeApp({ projectId: target ?? 'demo-visit-route' });
 const db = getFirestore();
 const auth = getAuth();
 const orgId = 'demo';

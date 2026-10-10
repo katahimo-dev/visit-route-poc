@@ -88,7 +88,7 @@ export default function StaffPage() {
     setError(null);
     try {
       await call('inviteMember', { email, role: 'staff', staffId, orgId: inviteOrg });
-      toast(`招待を準備しました。${terms.staff}にアプリを開いて、ログインメールを請求するよう伝えてください`);
+      toast(`招待を準備しました。${terms.staff}にアプリを開いて、ログインコードを請求するよう伝えてください`);
     } catch (e) {
       setError(formError(e));
     } finally {
@@ -101,7 +101,7 @@ export default function StaffPage() {
     setError(null);
     try {
       await call('inviteMember', { email: adminEmail, role: 'admin', staffId: null, orgId: inviteOrg });
-      toast('管理者の招待を準備しました。本人にアプリを開いて、ログインメールを請求するよう伝えてください');
+      toast('管理者の招待を準備しました。本人にアプリを開いて、ログインコードを請求するよう伝えてください');
       setAdminEmail('');
     } catch (e) {
       setError(formError(e));
@@ -274,7 +274,7 @@ export default function StaffPage() {
           </div>
           <p className="sub">
             招待のあと、{terms.staff}
-            本人にアプリを開いてもらい、ログインメールを請求してもらってください（保存してから招待します）。
+            本人にアプリを開いてもらい、メールに届くログインコードでログインしてもらってください（保存してから招待します）。
           </p>
         </div>
       )}

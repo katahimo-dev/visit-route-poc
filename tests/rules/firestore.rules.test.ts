@@ -129,3 +129,12 @@ describe('スタッフに見せない情報', () => {
     await assertFails(setDoc(doc(adminA(), 'orgs/A/clients/c1'), { displayName: '山田さん', ngStaffIds: ['s1'] }));
   });
 });
+
+describe('ログインコードとメール', () => {
+  it('画面からは誰も読み書きできない（業務関数だけ）', async () => {
+    await assertFails(getDoc(doc(adminA(), 'loginCodes/x')));
+    await assertFails(setDoc(doc(noClaims(), 'loginCodes/x'), { codeHash: 'x' }));
+    await assertFails(getDoc(doc(staffA1(), 'mail/x')));
+    await assertFails(setDoc(doc(noClaims(), 'mail/x'), { to: 'a@example.com' }));
+  });
+});

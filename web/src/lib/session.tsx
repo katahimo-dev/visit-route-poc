@@ -1,8 +1,8 @@
 import { DEFAULT_TERMS, type Org, type Role, type Terms } from '@vrp/shared';
 import { onIdTokenChanged, signOut, type User } from 'firebase/auth';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { clearIndexedDbPersistence, doc, onSnapshot, terminate, waitForPendingWrites } from 'firebase/firestore';
 import { createContext, type ReactNode, useContext, useEffect, useState } from 'react';
-import { auth, db } from './firebase';
+import { auth, CACHE_KEY, db, persistent } from './firebase';
 
 export type Session = {
   user: User;
@@ -25,11 +25,27 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       unsubOrg?.();
       unsubOrg = null;
       if (!user) {
+        // ログアウト・再認証切れ（使わなかった日数が過ぎた等）。端末に残ったデータを消す
+        if (persistent) {
+          localStorage.removeItem(CACHE_KEY);
+          await terminate(db);
+          await clearIndexedDbPersistence(db).catch(() => undefined);
+          location.reload();
+          return;
+        }
         setState({ loading: false, session: null });
         return;
       }
       const { claims } = await user.getIdTokenResult();
       const role = (claims.role as Role | undefined) ?? null;
+      // スタッフだけ端末に保存する。前回と違えば設定を変えて読み込み直す（firebase.ts）
+      const wantPersistent = role === 'staff';
+      if (wantPersistent !== persistent) {
+        if (wantPersistent) localStorage.setItem(CACHE_KEY, '1');
+        else localStorage.removeItem(CACHE_KEY);
+        location.reload();
+        return;
+      }
       const orgId = (claims.orgId as string | undefined) ?? null;
       const staffId = (claims.staffId as string | undefined) ?? null;
       const base: Session = { user, role, orgId, staffId, org: null, terms: DEFAULT_TERMS.other };
@@ -63,4 +79,17 @@ export function useSession(): Session {
   return s;
 }
 
-export const logout = () => signOut(auth);
+/**
+ * ログアウト。端末に保存したデータ（訪問先の住所など）も消す。
+ * 送れていない記録があるときは、消えてよいか確かめる（false を返したらやめた）。
+ */
+export async function logout(): Promise<boolean> {
+  const sent = await Promise.race([
+    waitForPendingWrites(db).then(() => true),
+    new Promise<boolean>((r) => setTimeout(() => r(false), 3000)),
+  ]);
+  if (!sent && !confirm('まだ送れていない記録があります。ログアウトすると消えます。ログアウトしますか？')) return false;
+  // 端末のデータは onIdTokenChanged（ログインしていない状態になったとき）で消す
+  await signOut(auth);
+  return true;
+}

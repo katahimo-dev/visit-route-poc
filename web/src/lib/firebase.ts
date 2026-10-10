@@ -3,6 +3,7 @@ import { connectAuthEmulator, getAuth } from 'firebase/auth';
 import {
   connectFirestoreEmulator,
   initializeFirestore,
+  memoryLocalCache,
   persistentLocalCache,
   persistentMultipleTabManager,
 } from 'firebase/firestore';
@@ -18,9 +19,18 @@ export const app = initializeApp({
 });
 
 export const auth = getAuth(app);
-// オフライン保存：電波が無いときの記録は端末に残り、つながったら送られる（R9）
+
+/**
+ * 端末にデータを保存するか（ADR-0007）。スタッフのスマホだけ保存する（電波が無いときの記録は端末に残り、
+ * つながったら送られる。R9）。管理者の PC は保存しない（閉じれば消える）。
+ * 役割はログインして初めて分かるので、前回の役割を覚えておき、違っていたら読み込み直す（session.tsx）。
+ */
+export const CACHE_KEY = 'vrp.persistentCache';
+export const persistent = localStorage.getItem(CACHE_KEY) === '1';
 export const db = initializeFirestore(app, {
-  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+  localCache: persistent
+    ? persistentLocalCache({ tabManager: persistentMultipleTabManager() })
+    : memoryLocalCache(),
 });
 export const functions = getFunctions(app, 'asia-northeast1');
 
