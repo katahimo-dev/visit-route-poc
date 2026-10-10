@@ -85,7 +85,8 @@ pnpm test:rules    # セキュリティルール（エミュレーター）
 - `functions/.env.corded-academy-502703-f5` に `DEMO_ORG_ID=demo`。画面は `web/.env.production.local` に `VITE_DEMO_LOGIN=true` を書いてビルド
 - データ：`SEED_PROJECT=corded-academy-502703-f5 pnpm seed`（GOOGLE_APPLICATION_CREDENTIALS か gcloud の ADC で）。予定は実行日から `SEED_UNTIL`（既定 2026-11-30）まで毎日入る（土日はスタッフ1人で3件）。入れ直しても記録は消えない
 - ログイン画面の「デモで試す（スタッフ／管理者）」で、メールなしで入れる。デモの印（`demo: true`）のある事業所にしか入れない
-- この間はコードのログインと招待は止まる（誰でも管理者になれるので、他人のアドレスへの送信の踏み台にしない）。地図APIのキー・Trigger Email は無くてよい（移動時間は直線距離の概算）
+- この間は招待が止まり、コードのログインは運営者だけになる（誰でも管理者になれるので、他人のアドレスへの送信の踏み台にしない）。地図APIのキーは無くてよい（移動時間は直線距離の概算）
+- 運営者の作業（実証データの CSV 出力など）をデモ期間中にするなら Trigger Email を用意する。用意しなければ、運営者の作業は切り替え後に行う
 
 **本番への切り替え**（デモの評価と調整が終わってから）
 1. `GCLOUD_PROJECT=corded-academy-502703-f5 pnpm tsx scripts/endDemo.ts` で消す対象を確かめ、`--apply` を付けて実行（デモの事業所と、デモ・@example.com のアカウントを消す）

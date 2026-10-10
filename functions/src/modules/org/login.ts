@@ -41,23 +41,28 @@ const pad = async (started: number) => {
   if (rest > 0) await new Promise((r) => setTimeout(r, rest));
 };
 
-/** 招待済み（事業所のクレームがある）なら uid */
-async function invitedUid(email: string): Promise<string | null> {
+/** 招待済み（事業所のクレームがある）なら uid と役割 */
+async function invitedMember(email: string): Promise<{ uid: string; role: string } | null> {
   const user = await getAuth()
     .getUserByEmail(email)
     .catch(() => null);
   const role = user?.customClaims?.role;
-  return user && !user.disabled && (role === 'staff' || role === 'admin' || role === 'operator') ? user.uid : null;
+  return user && !user.disabled && (role === 'staff' || role === 'admin' || role === 'operator')
+    ? { uid: user.uid, role }
+    : null;
 }
 
 /**
  * 6桁のコードをメールで送る。招待されていない・送信の上限に当たったときも、同じ応答・同じくらいの時間で返す
- * （登録の有無を探らせない）。デモの事業所を置いた環境では送らない（迷惑メールの踏み台にしない。エミュレーターは除く）。
+ * （登録の有無を探らせない）。デモ期間は運営者にだけ送る（迷惑メールの踏み台にしない。エミュレーターは除く）。
  */
 export const requestLoginCode = onCall({ region: REGION }, async (req) => {
   const started = Date.now();
   const { email } = parse(requestLoginCodeRequest, req.data);
-  if ((DEMO_ORG_ID.value() && !isEmulator) || !(await invitedUid(email))) {
+  const member = await invitedMember(email);
+  // デモ期間は運営者にだけ送る（運営者は自分で作った人だけ。誰でもなれるデモの管理者からは作れない）
+  const demoBlocked = DEMO_ORG_ID.value() && !isEmulator && member?.role !== 'operator';
+  if (!member || demoBlocked) {
     await pad(started);
     return { sent: true as const };
   }
@@ -112,7 +117,7 @@ export const verifyLoginCode = onCall({ region: REGION }, async (req) => {
       result.left > 0 ? `コードが違います（あと${result.left}回）` : 'コードが違います。もう一度コードを送ってください',
     );
   }
-  const uid = await invitedUid(email);
+  const uid = (await invitedMember(email))?.uid;
   if (!uid) throw new HttpsError('permission-denied', 'このメールアドレスではログインできません');
   return { token: await getAuth().createCustomToken(uid) };
 });
@@ -147,7 +152,7 @@ export const revokeInactiveSessions = onSchedule(
 
 /**
  * デモ用のログイン。メール不要で、デモの事業所の管理者か最初のスタッフとしてログインする。
- * 画面説明・お試し用。デモの事業所は架空のデータだけを置き、本番とは別のプロジェクトで動かす（ADR-0007）。
+ * 画面説明・お試し用。入れるのはデモの印（demo: true）のある架空の事業所だけで、実データの事業所には入れない（ADR-0007）。
  */
 export const demoSignIn = onCall({ region: REGION }, async (req) => {
   const orgId = DEMO_ORG_ID.value();

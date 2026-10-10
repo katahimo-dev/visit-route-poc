@@ -3,7 +3,7 @@
  *   GCLOUD_PROJECT=<プロジェクトID> pnpm tsx scripts/endDemo.ts          … 消す対象を表示するだけ
  *   GCLOUD_PROJECT=<プロジェクトID> pnpm tsx scripts/endDemo.ts --apply  … 実際に消す
  * 消すもの：デモの印のある事業所（orgs/{id} と配下すべて）と、そこに属するアカウント・デモ用アカウント・
- * seedDemo が作った @example.com のアカウント。実データの事業所（印が無い）には触れない。
+ * seedDemo が作ったアカウント。実データの事業所（印が無い）とそのメンバーには触れない。
  * このあと functions/.env.<project> の DEMO_ORG_ID と、画面の VITE_DEMO_LOGIN を外してデプロイする（README）。
  */
 import type { Org } from '@vrp/shared';
@@ -12,6 +12,14 @@ import { getAuth, type UserRecord } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
 
 const apply = process.argv.includes('--apply');
+/** seedDemo が作るアカウント（運営者はクレームに事業所が無いので、アドレスで見分ける） */
+const SEED_EMAILS = [
+  'operator@example.com',
+  'admin@example.com',
+  'staff1@example.com',
+  'staff2@example.com',
+  'staff3@example.com',
+];
 if (getApps().length === 0)
   initializeApp({ projectId: process.env.GCLOUD_PROJECT ?? process.env.FIREBASE_PROJECT ?? 'demo-visit-route' });
 const db = getFirestore();
@@ -27,10 +35,12 @@ do {
   const page = await auth.listUsers(1000, pageToken);
   for (const u of page.users) {
     const orgId = u.customClaims?.orgId;
+    // 実データの事業所のメンバーは、どんなアドレスでも消さない
+    if (typeof orgId === 'string' && realOrgIds.includes(orgId)) continue;
     const demoUser =
       u.uid.startsWith('demo-') ||
       (typeof orgId === 'string' && demoOrgIds.includes(orgId)) ||
-      (u.email?.endsWith('@example.com') ?? false);
+      SEED_EMAILS.includes(u.email ?? '');
     if (demoUser) users.push(u);
   }
   pageToken = page.pageToken;

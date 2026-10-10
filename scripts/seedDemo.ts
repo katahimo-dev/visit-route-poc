@@ -188,6 +188,9 @@ function plansOf(date: string, n: number): typeof plan {
     );
 }
 
+// 事業所の文書を先に書く（途中で止まっても、endDemo が事業所を見つけて片付けられるように）
+await db.doc(`orgs/${orgId}`).set(org);
+
 for (const [n, date] of dates.entries()) {
   const batch = db.batch();
   const today = plansOf(date, n);
@@ -220,7 +223,6 @@ for (const [n, date] of dates.entries()) {
   await batch.commit();
 }
 
-await db.doc(`orgs/${orgId}`).set(org);
 for (const [id, s] of Object.entries(staff)) await db.doc(`orgs/${orgId}/staff/${id}`).set(s);
 for (const [id, { ngStaffIds, ...c }] of Object.entries(clients)) {
   await db.doc(`orgs/${orgId}/clients/${id}`).set(c);
