@@ -15,6 +15,7 @@
 web/                         … React + Vite + TypeScript PWA（Firebase Hosting）
   src/features/staff/<機能>/   … スタッフのスマホ画面
   src/features/admin/<機能>/   … 管理者のPC画面
+  src/features/availability/   … 稼働時間帯（管理者のカレンダーとスタッフのシフト画面で共用。ADR-0008）
   src/lib/firebase.ts          … SDK 初期化（ここ以外で initializeApp しない）
 functions/                   … Cloud Functions（TypeScript, codebase: default）
   src/modules/<コンポーネント名>/

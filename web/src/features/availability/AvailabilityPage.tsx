@@ -6,6 +6,7 @@ import {
   type Slot,
   type Staff,
   slotsText,
+  toHalfHours,
   weekday,
 } from '@vrp/shared';
 import { where } from 'firebase/firestore';
@@ -74,7 +75,7 @@ export default function AvailabilityPage() {
   // biome-ignore lint/correctness/useExhaustiveDependencies: 選んだセルが変わったときだけ下書きを作り直す
   useEffect(() => {
     setError(null);
-    if (picked && pickedStaff) setDraft(availabilityOf(pickedStaff, picked.date, pickedOverride).slots);
+    if (picked && pickedStaff) setDraft(toHalfHours(availabilityOf(pickedStaff, picked.date, pickedOverride).slots));
   }, [picked?.staffId, picked?.date]);
 
   const run = async (fn: () => Promise<void>, done: string) => {

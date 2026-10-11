@@ -210,6 +210,7 @@ export default function StaffPage() {
               勤務開始
               <input
                 type="time"
+                step={1800}
                 value={form.shiftStart}
                 onChange={(e) => setForm({ ...form, shiftStart: e.target.value })}
               />
@@ -218,6 +219,7 @@ export default function StaffPage() {
               勤務終了
               <input
                 type="time"
+                step={1800}
                 value={form.shiftEnd}
                 onChange={(e) => setForm({ ...form, shiftEnd: e.target.value })}
               />

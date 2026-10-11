@@ -9,7 +9,7 @@ import {
 } from '@vrp/shared';
 import { getAuth } from 'firebase-admin/auth';
 import { Timestamp } from 'firebase-admin/firestore';
-import { defineString } from 'firebase-functions/params';
+import { defineSecret, defineString } from 'firebase-functions/params';
 import { logger } from 'firebase-functions/v2';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
@@ -37,8 +37,11 @@ import {
 
 /** デモの事業所（設定した環境だけ。本番の事業所には設定しない） */
 export const DEMO_ORG_ID = defineString('DEMO_ORG_ID', { default: '' });
-/** デモの簡易パスワードのハッシュ（scripts/demoPasswordHash.ts）。未設定ならデモに入れない */
-export const DEMO_PASSWORD_HASH = defineString('DEMO_PASSWORD_HASH', { default: '' });
+/**
+ * デモの簡易パスワードのハッシュ（scripts/demoPasswordHash.ts で作り、Secret Manager に置く）。
+ * リポジトリは公開なので、ハッシュも設定ファイルに書かない（弱いパスワードはハッシュから総当たりで戻せる）
+ */
+export const DEMO_PASSWORD_HASH = defineSecret('DEMO_PASSWORD_HASH');
 
 const codes = () => db.collection('loginCodes');
 const isEmulator = process.env.FUNCTIONS_EMULATOR === 'true';
@@ -190,7 +193,7 @@ async function demoStaffDocs(orgId: string) {
  * デモ用：ログインする人を選ぶための、デモの事業所のスタッフ（未ログインで呼べる）。
  * 返すのは seed が作った架空の人物の名前と、その日の訪問件数だけ（ADR-0007）
  */
-export const demoStaffList = onCall({ region: REGION }, async (req) => {
+export const demoStaffList = onCall({ region: REGION, secrets: [DEMO_PASSWORD_HASH] }, async (req) => {
   const { password, date } = parse(demoStaffListRequest, req.data);
   const orgId = await demoOrg(password);
   const [staffDocs, visitsSnap] = await Promise.all([
@@ -210,7 +213,7 @@ export const demoStaffList = onCall({ region: REGION }, async (req) => {
  * デモ用のログイン。メール不要で、デモの事業所の管理者か、選んだスタッフ（無指定なら最初の人）としてログインする。
  * 画面説明・お試し用。入れるのはデモの印（demo: true）のある架空の事業所だけで、実データの事業所には入れない（ADR-0007）。
  */
-export const demoSignIn = onCall({ region: REGION }, async (req) => {
+export const demoSignIn = onCall({ region: REGION, secrets: [DEMO_PASSWORD_HASH] }, async (req) => {
   const { password, as, staffId } = parse(demoSignInRequest, req.data);
   const orgId = await demoOrg(password);
   const auth = getAuth();

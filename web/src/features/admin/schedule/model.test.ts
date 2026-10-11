@@ -60,6 +60,23 @@ describe('timesOf', () => {
   });
 });
 
+describe('timesOf：稼働時間帯に寄せる', () => {
+  const slots = [
+    { start: '10:00', end: '12:00' },
+    { start: '14:00', end: '18:00' },
+  ];
+  it('幅のある訪問は、時間帯の中で入れる最も早い時刻に始める（時間外にしない）', () => {
+    const late = visit('a', '09:00', { windowKind: 'window', latestStart: '11:00' });
+    expect(timesOf(['a'], mapOf([late]), slots).get('a')).toMatchObject({ start: 600, end: 660 });
+    const overLunch = visit('b', '11:30', { windowKind: 'window', latestStart: '14:30' });
+    expect(timesOf(['b'], mapOf([overLunch]), slots).get('b')).toMatchObject({ start: 840, end: 900 });
+  });
+  it('幅の中で収まらなければ、そのままの時刻（時間外として知らせる）', () => {
+    const fixed = visit('c', '09:00');
+    expect(timesOf(['c'], mapOf([fixed]), slots).get('c')).toMatchObject({ start: 540, end: 600 });
+  });
+});
+
 describe('warningsOf', () => {
   const staff: Staff = {
     name: 'テスト',

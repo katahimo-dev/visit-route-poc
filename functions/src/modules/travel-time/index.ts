@@ -38,7 +38,7 @@ export type PredictedMatrix = {
   meters: number[][];
   baseSeconds: number[][];
   modelVersion: string;
-  /** 地図API（Google Routes）を使ったか。事業所の設定 useMapsApi（既定 true）で切り替える */
+  /** 実際に地図API（Google Routes）の値を使ったか。使うかどうかは事業所の設定 useMapsApi（既定 true） */
   mapsApi: boolean;
 };
 
@@ -55,8 +55,10 @@ export async function predictMatrix(
   model?: TravelModel,
 ): Promise<PredictedMatrix> {
   const m = model ?? (await currentModel(orgId));
-  const mapsApi = (await orgDoc(orgId).get()).get('useMapsApi') !== false;
-  const base = await baseMatrix(orgId, points, mode, departAtMs, mapsApi);
+  const useMaps = (await orgDoc(orgId).get()).get('useMapsApi') !== false;
+  const base = await baseMatrix(orgId, points, mode, departAtMs, useMaps);
+  // 実際に地図APIの値（キャッシュ含む）を使ったか。設定が on でもキーが無ければ概算になる
+  const mapsApi = base.some((row, i) => row.some((l, j) => i !== j && l.source === 'routes_api'));
   const key = factorKey(mode, timeBandOf(hhmmToMinutes(jstHhmm(departAtMs))), dayTypeOf(weekday(date)));
   const usedFallback = base.some((row) => row.some((l) => l.source === 'fallback' && l.seconds > 0));
   return {

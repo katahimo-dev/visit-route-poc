@@ -6,6 +6,7 @@ import {
   type Slot,
   type Staff,
   slotsText,
+  toHalfHours,
   weekday,
 } from '@vrp/shared';
 import { where } from 'firebase/firestore';
@@ -55,7 +56,7 @@ export function MyAvailabilityPage() {
       return;
     }
     setOpen(date);
-    setDraft(availabilityOf(me, date, overrides.get(date)).slots);
+    setDraft(toHalfHours(availabilityOf(me, date, overrides.get(date)).slots));
   };
   const run = async (fn: () => Promise<void>, done: string) => {
     setBusy(true);

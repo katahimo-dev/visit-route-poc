@@ -140,3 +140,21 @@ describe('prepare：稼働時間帯（ADR-0008）', () => {
     expect(extra.request.staff[0]).not.toHaveProperty('breaks');
   });
 });
+
+describe('prepare：休みの日に手作業の担当がある人', () => {
+  it('最適化では訪問を持たせず、評価では休みの印を付ける', () => {
+    const p = prepare(
+      {
+        org,
+        staff: [staff('s1', 38.2)],
+        clients: new Map([['c1', client(38.3)]]),
+        visits: [visit('v1', 'c1', 's1')],
+        manualRoutes: { s1: ['v1'] },
+        availability: new Map([['s1', { slots: [] }]]),
+      },
+      '2026-10-19',
+    );
+    expect(p.request.staff[0]).toMatchObject({ staffId: 's1', maxVisits: 0 });
+    expect(p.staffIn[0]).toMatchObject({ staffId: 's1', off: true });
+  });
+});

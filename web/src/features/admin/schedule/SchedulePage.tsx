@@ -101,11 +101,6 @@ export default function SchedulePage() {
     for (const [s, ids] of Object.entries(view.cols)) for (const id of ids) m.set(id, s);
     return m;
   }, [view]);
-  const times = useMemo(() => {
-    const m = new Map<string, Slotted>();
-    for (const ids of Object.values(view.cols)) for (const [id, t] of timesOf(ids, visitById)) m.set(id, t);
-    return m;
-  }, [view, visitById]);
 
   const dow = weekday(date);
   /** その日の稼働時間帯（基本の曜日と時間＋日ごとの上書き。ADR-0008） */
@@ -113,6 +108,12 @@ export default function SchedulePage() {
     const overrides = new Map((availQ.rows ?? []).map((a) => [a.staffId, a]));
     return new Map(staff.map((s) => [s.id, availabilityOf(s, date, overrides.get(s.id))]));
   }, [staff, availQ.rows, date]);
+  const times = useMemo(() => {
+    const m = new Map<string, Slotted>();
+    for (const [sid, ids] of Object.entries(view.cols))
+      for (const [id, t] of timesOf(ids, visitById, slotsOf.get(sid)?.slots)) m.set(id, t);
+    return m;
+  }, [view, visitById, slotsOf]);
   const worksToday = (s: WithId<Staff>) => s.active && (slotsOf.get(s.id)?.slots.length ?? 0) > 0;
   /** 担当に選べる人：その日に働ける人を先に、休みの人は後ろ（休止中の人は、すでに担当している訪問があるときだけ） */
   const choosable = [...staff.filter(worksToday), ...staff.filter((s) => s.active && !worksToday(s))];
@@ -139,7 +140,7 @@ export default function SchedulePage() {
   const dropWarning = (to: string): Warning[] => {
     if (!dragging || to === NONE || ownerOf.get(dragging) === to) return [];
     const next = assign(view, dragging, to, visitById);
-    const t = timesOf(next.cols[to] ?? [], visitById).get(dragging);
+    const t = timesOf(next.cols[to] ?? [], visitById, slotsOf.get(to)?.slots).get(dragging);
     const v = visitById.get(dragging);
     return warningsOf(
       staffById.get(to),

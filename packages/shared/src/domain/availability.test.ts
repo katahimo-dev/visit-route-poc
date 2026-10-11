@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { availabilitySchema } from '../contracts/documents';
-import { availabilityOf, normalizeSlots, shiftOf, slotsError, slotsText, withinSlots } from './availability';
+import {
+  availabilityOf,
+  normalizeSlots,
+  shiftOf,
+  slotsError,
+  slotsText,
+  toHalfHours,
+  withinSlots,
+} from './availability';
 
 const base = { workDays: [1, 2, 3, 4, 5], shiftStart: '08:00', shiftEnd: '18:00' };
 // 2026-10-12 は月曜、2026-10-11 は日曜
@@ -60,6 +68,13 @@ describe('normalizeSlots', () => {
       { start: '09:00', end: '13:00' },
       { start: '14:00', end: '18:00' },
     ]);
+  });
+});
+
+describe('toHalfHours', () => {
+  it('開始は切り捨て、終了は切り上げで30分単位にする', () => {
+    expect(toHalfHours([{ start: '09:15', end: '17:45' }])).toEqual([{ start: '09:00', end: '18:00' }]);
+    expect(toHalfHours([{ start: '23:10', end: '23:50' }])).toEqual([{ start: '23:00', end: '23:30' }]);
   });
 });
 

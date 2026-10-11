@@ -57,7 +57,8 @@ export function prepare(e: Entities, date: string): Prepared {
   for (const s of e.staff) {
     if (!s.active) continue;
     // その日に稼働時間帯があるか、手作業案で担当があるスタッフだけを対象にする。
-    // 時間帯の無い日に担当がある人は、手作業案を評価するために基本の時間で入れる（AI案の条件違反として数える）
+    // 時間帯の無い日（休み）に担当がある人は、手作業案を評価するために基本の時間で入れるが、
+    // 最適化では訪問を持たせず（maxVisits 0）、評価では担当1件ごとに条件違反にする
     const shift = shiftOf(availabilityOf(s, date, e.availability.get(s.id)).slots);
     if (!shift && !assigned.has(s.id)) continue;
     const { shiftStart, shiftEnd, breaks } = shift ?? { shiftStart: s.shiftStart, shiftEnd: s.shiftEnd, breaks: [] };
@@ -66,7 +67,14 @@ export function prepare(e: Entities, date: string): Prepared {
       continue;
     }
     const p = add(`staff/${s.id}`, s.home.lat, s.home.lng);
-    staffIn.push({ staffId: s.id, homePointId: `staff/${s.id}`, shiftStart, shiftEnd, breaks });
+    staffIn.push({
+      staffId: s.id,
+      homePointId: `staff/${s.id}`,
+      shiftStart,
+      shiftEnd,
+      breaks,
+      ...(shift ? {} : { off: true }),
+    });
     staffReq.push({
       staffId: s.id,
       gender: s.gender,
@@ -75,6 +83,7 @@ export function prepare(e: Entities, date: string): Prepared {
       shiftStart,
       shiftEnd,
       ...(breaks.length > 0 ? { breaks } : {}),
+      ...(shift ? {} : { maxVisits: 0 }),
     });
   }
   const staffIds = new Set(staffIn.map((s) => s.staffId));

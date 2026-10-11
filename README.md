@@ -95,15 +95,15 @@ Hosting は1つのプロジェクトに複数のサイトを置いている（`.
 実証用プロジェクトは、まずデモ（架空の事業所）で画面を見てもらい、指摘を直してから、デモを外して協力法人の実データで検証する。
 
 **デモ期間**（今の設定）
-- `functions/.env.corded-academy-502703-f5` に `DEMO_ORG_ID=demo` と `DEMO_PASSWORD_HASH`。画面は `web/.env.production.local` に `VITE_DEMO_LOGIN=true` を書いてビルド
+- `functions/.env.corded-academy-502703-f5` に `DEMO_ORG_ID=demo`。Secret Manager に `DEMO_PASSWORD_HASH`（下）。画面は `web/.env.production.local` に `VITE_DEMO_LOGIN=true` を書いてビルド
 - データ：`SEED_PROJECT=corded-academy-502703-f5 pnpm seed`（GOOGLE_APPLICATION_CREDENTIALS か gcloud の ADC で。ADC の課金先が別のプロジェクトなら `GOOGLE_CLOUD_QUOTA_PROJECT=corded-academy-502703-f5` も付ける）。スタッフ8人・訪問先20か所・日ごとの稼働時間帯の上書き（時間休・休み・休日出勤・遅出）。予定は実行日から `SEED_UNTIL`（既定 2026-11-30）まで毎日入る（平日は17件前後、土日はスタッフ3人で8件）。入れ直すと実行日以降の予定・AI案は作り直す（同じ日は同じ予定になる。スタッフの記録がある日と、過去の記録・勤怠はそのまま）
-- ログイン画面の「デモで試す」で簡易パスワードを入れると、管理者か、選んだスタッフとしてメールなしで入れる（スタッフは今日の件数つきで並ぶ）。パスワードのハッシュは `functions/.env.<project>` の `DEMO_PASSWORD_HASH`（`pnpm tsx scripts/demoPasswordHash.ts <パスワード>` で作る）。デモの印（`demo: true`）のある事業所にしか入れない
+- ログイン画面の「デモで試す」で簡易パスワードを入れると、管理者か、選んだスタッフとしてメールなしで入れる（スタッフは今日の件数つきで並ぶ）。パスワードのハッシュは Secret Manager の `DEMO_PASSWORD_HASH`（`pnpm tsx scripts/demoPasswordHash.ts <パスワード>` で作り、`firebase functions:secrets:set DEMO_PASSWORD_HASH` で置く。エミュレーターは `functions/.secret.local`）。リポジトリは公開なので、パスワードもハッシュもリポジトリに書かない。デモの印（`demo: true`）のある事業所にしか入れない
 - この間は招待が止まり、コードのログインは運営者だけになる（誰でも管理者になれるので、他人のアドレスへの送信の踏み台にしない）。移動時間に Google の地図API を使うかは、管理者が「AI案」の画面で切り替える（デモの既定は使わない＝直線距離の概算。使うには Secret Manager の `MAPS_SERVER_KEY` が要る）
 - 運営者の作業（実証データの CSV 出力など）をデモ期間中にするなら Trigger Email を用意する。用意しなければ、運営者の作業は切り替え後に行う
 
 **本番への切り替え**（デモの評価と調整が終わってから）
 1. `GCLOUD_PROJECT=corded-academy-502703-f5 pnpm tsx scripts/endDemo.ts` で消す対象を確かめ、`--apply` を付けて実行（デモの事業所と、デモ・@example.com のアカウントを消す）
-2. `functions/.env.corded-academy-502703-f5` から `DEMO_ORG_ID`・`DEMO_PASSWORD_HASH` を消し、`VITE_DEMO_LOGIN` を外して画面をビルド
+2. `functions/.env.corded-academy-502703-f5` から `DEMO_ORG_ID` を消し、`VITE_DEMO_LOGIN` を外して画面をビルド
 3. 上の手順1・2（Trigger Email・TTL・トークン署名の権限、`MAPS_SERVER_KEY`）を用意して `firebase deploy`。画面は本番のサイトに出す（下の「画面のアドレス」）
 4. `pnpm org:create` で協力法人の事業所を作り、管理者を招待する
 

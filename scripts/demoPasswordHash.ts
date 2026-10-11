@@ -1,5 +1,6 @@
 /**
- * デモの簡易パスワードのハッシュを出す（functions/.env.<project> の DEMO_PASSWORD_HASH に書く）。
+ * デモの簡易パスワードのハッシュを出す（Secret Manager の DEMO_PASSWORD_HASH に置く。リポジトリには書かない）。
+ *   firebase functions:secrets:set DEMO_PASSWORD_HASH
  *   pnpm tsx scripts/demoPasswordHash.ts <パスワード>
  */
 import { demoPasswordHash } from '../functions/src/modules/org/domain/login';

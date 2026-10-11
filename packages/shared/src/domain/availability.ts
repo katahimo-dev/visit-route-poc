@@ -60,6 +60,18 @@ export function normalizeSlots(slots: Slot[]): Slot[] {
   return out;
 }
 
+/** 30分単位に丸める（開始は切り捨て、終了は切り上げ）。30分単位でない基本の時間から下書きを作るとき用 */
+export function toHalfHours(slots: Slot[]): Slot[] {
+  const step = SLOT_STEP_MINUTES;
+  const last = 24 * 60 - step;
+  return normalizeSlots(
+    slots.map((s) => ({
+      start: minutesToHhmm(Math.floor(hhmmToMinutes(s.start) / step) * step),
+      end: minutesToHhmm(Math.min(last, Math.ceil(hhmmToMinutes(s.end) / step) * step)),
+    })),
+  ).filter((s) => s.start < s.end);
+}
+
 /** 分の区間 [start, end) が、どれか1つの時間帯の中に収まるか */
 export function withinSlots(slots: Slot[], startMinutes: number, endMinutes: number): boolean {
   return slots.some((s) => hhmmToMinutes(s.start) <= startMinutes && endMinutes <= hhmmToMinutes(s.end));

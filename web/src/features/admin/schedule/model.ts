@@ -61,17 +61,18 @@ export function assign(view: View, id: string, to: string, visitById: Map<string
 /**
  * 列の中の訪問の時刻（移動時間は入れない目安）と、時間の重なり。
  * 前の訪問が終わるまで次は始められないとして詰め、約束の時刻（幅があれば最も遅い開始）を過ぎる訪問と、
- * その原因になった前の訪問の両方を「重なり」にする
+ * その原因になった前の訪問の両方を「重なり」にする。
+ * slots（その人の稼働時間帯）を渡すと、約束の幅の中で、作業が時間帯の1つに収まる最も早い時刻に寄せる
  */
 export type Slotted = { start: number; end: number; overlap: boolean };
-export function timesOf(ids: string[], visitById: Map<string, Visit>): Map<string, Slotted> {
+export function timesOf(ids: string[], visitById: Map<string, Visit>, slots?: Slot[]): Map<string, Slotted> {
   const out = new Map<string, Slotted>();
   let free = 0;
   let prevId: string | null = null;
   for (const id of ids) {
     const v = visitById.get(id);
     if (!v) continue;
-    const start = Math.max(hhmmToMinutes(v.earliestStart), free);
+    const start = fitInSlots(Math.max(hhmmToMinutes(v.earliestStart), free), v, slots);
     const end = start + v.durationMinutes;
     const overlap = start > hhmmToMinutes(v.latestStart);
     out.set(id, { start, end, overlap });
@@ -81,6 +82,17 @@ export function timesOf(ids: string[], visitById: Map<string, Visit>): Map<strin
     prevId = id;
   }
   return out;
+}
+
+/** 約束の幅（最も遅い開始まで）の中で、作業が時間帯の1つに収まる最も早い開始。無ければそのまま */
+function fitInSlots(start: number, v: Visit, slots: Slot[] | undefined): number {
+  if (!slots) return start;
+  const latest = hhmmToMinutes(v.latestStart);
+  for (const s of slots) {
+    const at = Math.max(start, hhmmToMinutes(s.start));
+    if (at <= latest && at + v.durationMinutes <= hhmmToMinutes(s.end)) return at;
+  }
+  return start;
 }
 
 export const hhmm = (minutes: number) => minutesToHhmm(minutes);
