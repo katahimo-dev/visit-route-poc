@@ -158,3 +158,21 @@ describe('prepare：休みの日に手作業の担当がある人', () => {
     expect(p.staffIn[0]).toMatchObject({ staffId: 's1', off: true });
   });
 });
+
+describe('prepare：休止中の人', () => {
+  it('手作業の担当が残っていれば、計算に入れなかった理由を返す', () => {
+    const p = prepare(
+      {
+        org,
+        staff: [{ ...staff('s1', 38.2), active: false }],
+        clients: new Map([['c1', client(38.3)]]),
+        visits: [visit('v1', 'c1', 's1')],
+        manualRoutes: { s1: ['v1'] },
+        availability: new Map(),
+      },
+      '2026-10-19',
+    );
+    expect(p.staffIn).toEqual([]);
+    expect(p.skipped).toContainEqual({ kind: 'staff', id: 's1', reason: 'inactive' });
+  });
+});

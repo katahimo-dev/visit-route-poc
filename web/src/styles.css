@@ -579,3 +579,90 @@ th {
   color: var(--primary-dark);
   font-weight: 700;
 }
+
+/* AI案：手作業案と並べて比較 */
+.method-help {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: #faf6f2;
+  font-size: 0.85rem;
+  line-height: 1.6;
+}
+.kpi-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 12px;
+}
+.kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  border: 1.5px solid var(--line);
+  border-radius: 14px;
+}
+.kpi .chip {
+  align-self: flex-start;
+}
+.kpi-value {
+  font-size: 1.15rem;
+  font-variant-numeric: tabular-nums;
+}
+.compare {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.compare-row {
+  display: grid;
+  grid-template-columns: 170px minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  padding-top: 10px;
+  border-top: 4px solid var(--line);
+}
+.compare-header {
+  border-top: 0;
+  padding-top: 0;
+  font-weight: 700;
+  color: var(--sub);
+}
+.compare-staff {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 8px;
+  border: 1.5px solid transparent;
+  border-radius: 12px;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.compare-staff.is-on {
+  border-color: var(--line);
+  background: #faf6f2;
+}
+.compare-col {
+  min-width: 0;
+}
+.leg-line {
+  padding: 3px 0 3px 14px;
+  margin-left: 10px;
+  border-left: 3px dotted var(--line);
+  color: var(--sub);
+  font-size: 0.8rem;
+}
+.route-item.is-moved {
+  border-color: #4a7fc1;
+  background: #eef4fb;
+}
+.chip-move {
+  align-self: flex-start;
+  background: #dce8f6;
+  color: #2f5f99;
+  font-weight: 700;
+}

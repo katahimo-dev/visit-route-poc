@@ -2,6 +2,7 @@ import {
   type AttendanceDay,
   type Client,
   distanceMeters,
+  estimateLeg,
   hhmmToMinutes,
   jstHhmm,
   type LatLng,
@@ -38,6 +39,10 @@ export type PredictedMatrix = {
   meters: number[][];
   baseSeconds: number[][];
   modelVersion: string;
+  /** 同じ区間を直線距離の概算で求め、同じ補正をかけた値（地図APIとの差を見せる。秒） */
+  estimateSeconds: number[][];
+  /** 区間ごとに地図APIで測ったか（キャッシュ含む）。近傍の区間だけを測り、残りは概算を補正して埋める（ADR-0004） */
+  measured: boolean[][];
   /** 実際に地図API（Google Routes）の値を使ったか。使うかどうかは事業所の設定 useMapsApi（既定 true） */
   mapsApi: boolean;
 };
@@ -58,14 +63,19 @@ export async function predictMatrix(
   const useMaps = (await orgDoc(orgId).get()).get('useMapsApi') !== false;
   const base = await baseMatrix(orgId, points, mode, departAtMs, useMaps);
   // 実際に地図APIの値（キャッシュ含む）を使ったか。設定が on でもキーが無ければ概算になる
-  const mapsApi = base.some((row, i) => row.some((l, j) => i !== j && l.source === 'routes_api'));
+  const measured = base.map((row, i) => row.map((l, j) => i !== j && l.source === 'routes_api'));
+  const mapsApi = measured.some((row) => row.some(Boolean));
   const key = factorKey(mode, timeBandOf(hhmmToMinutes(jstHhmm(departAtMs))), dayTypeOf(weekday(date)));
   const usedFallback = base.some((row) => row.some((l) => l.source === 'fallback' && l.seconds > 0));
   return {
     baseSeconds: base.map((row) => row.map((l) => l.seconds)),
     seconds: base.map((row) => row.map((l) => applyModel(l.seconds, m, key))),
     meters: base.map((row) => row.map((l) => l.meters)),
+    estimateSeconds: points.map((a, i) =>
+      points.map((b, j) => (i === j ? 0 : applyModel(estimateLeg(a, b, mode).seconds, m, key))),
+    ),
     modelVersion: usedFallback ? `${m.version}+fallback` : m.version,
+    measured,
     mapsApi,
   };
 }

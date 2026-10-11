@@ -20,6 +20,7 @@ import { db } from '../../../lib/firebase';
 import { useSession } from '../../../lib/session';
 import { useOrgCollection, useOrgDoc, type WithId } from '../../../lib/useCollection';
 import { addDays, DateField, formError, hasLocation, staffColor, tomorrow, useAdmin, WEEKDAY_LABELS } from '../common';
+import { ClientName } from '../parts';
 import {
   assign,
   type Cols,
@@ -304,17 +305,7 @@ export default function SchedulePage() {
     return { points: pts, lines: lns };
   }, [staff, view, visitById, clientById, colorOfStaff]);
 
-  const clientCell = (v: Visit) => {
-    const c = clientById.get(v.clientId);
-    return (
-      <div className="visit-name">
-        <span className="dot dot-sm" style={{ background: colorOf(c?.color ?? 0) }}>
-          {initialOf(c?.displayName ?? '?')}
-        </span>
-        <span className="ellipsis">{c?.displayName ?? '（不明）'}</span>
-      </div>
-    );
-  };
+  const clientCell = (v: Visit) => <ClientName client={clientById.get(v.clientId)} />;
 
   const editingVisit = editing && editing !== 'new' ? (visitById.get(editing) ?? null) : null;
 
