@@ -5,12 +5,25 @@
   ng_staff    … 性別を満たすスタッフがみなNG
   unreachable … 候補スタッフの全員が、出発地→訪問先 または 訪問先→帰宅先 に到達できない
   shift       … 候補のどのスタッフの勤務時間にも、この訪問だけでも収まらない
+                （作業の時間が休み（breaks）に重ならない開始時刻がとれない場合を含む）
   time_window … 上のどれでもない（他の訪問との組み合わせ・最大訪問数で入りきらない）
 """
 
 from __future__ import annotations
 
 from .request import SolveRequest, Staff, Visit
+
+
+def avoid_breaks(start: int, duration: int, breaks: tuple[tuple[int, int], ...]) -> int:
+    """作業 [start, start+duration) が休みに重なるなら、重ならない最も早い開始時刻にずらす。
+
+    breaks は開始の順・重なりなし（request で検証済み）なので、前から1回なめればよい。
+    移動は休みにかかってよいので、ずらすのは作業の開始だけ。
+    """
+    for bs, be in breaks:
+        if start < be and start + duration > bs:
+            start = be
+    return start
 
 
 def eligible_staff(req: SolveRequest, visit: Visit) -> list[Staff]:
@@ -54,6 +67,7 @@ def diagnose(req: SolveRequest, visit: Visit) -> list[str]:
 
     for s, go, back in reachable:
         start = max(s.shift_start + go, visit.earliest_start)
+        start = avoid_breaks(start, visit.duration_seconds, s.breaks)
         if start <= visit.latest_start and start + visit.duration_seconds + back <= s.shift_end:
             return ["time_window"]  # 単独なら収まる＝他との組み合わせが原因
     return ["shift"]

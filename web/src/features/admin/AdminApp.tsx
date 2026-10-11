@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Navigate, NavLink, Route, Routes } from 'react-router-dom';
 import { db } from '../../lib/firebase';
 import { logout, useSession } from '../../lib/session';
+import AvailabilityPage from '../availability/AvailabilityPage';
 import AttendancePage from './AttendancePage';
 import ClientsPage from './ClientsPage';
 import { AdminProvider } from './common';
@@ -76,6 +77,7 @@ export default function AdminApp() {
           予定
         </NavLink>
         <NavLink to="/admin/plan">AI案</NavLink>
+        <NavLink to="/admin/availability">稼働時間</NavLink>
         <NavLink to="/admin/staff">{terms.staff}</NavLink>
         <NavLink to="/admin/clients">{terms.client}</NavLink>
         <NavLink to="/admin/attendance">勤怠</NavLink>
@@ -92,6 +94,7 @@ export default function AdminApp() {
             <Routes>
               <Route index element={<SchedulePage />} />
               <Route path="plan" element={<PlanPage />} />
+              <Route path="availability" element={<AvailabilityPage />} />
               <Route path="staff" element={<StaffPage />} />
               <Route path="clients" element={<ClientsPage />} />
               <Route path="attendance" element={<AttendancePage />} />

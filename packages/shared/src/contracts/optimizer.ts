@@ -17,6 +17,10 @@ export const solveRequestSchema = z.object({
       endPoint: z.number().int(),
       shiftStart: hhmm,
       shiftEnd: hhmm,
+      breaks: z
+        .array(z.object({ start: hhmm, end: hhmm }))
+        .max(4)
+        .optional(),
       maxVisits: z.number().int().optional(),
     }),
   ),

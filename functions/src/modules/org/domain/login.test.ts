@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   CODE_TTL_MS,
   canSend,
+  checkDemoPassword,
+  demoPasswordHash,
   demoStaffOf,
   failed,
   isDemoStaffId,
@@ -102,5 +104,19 @@ describe('デモのスタッフ', () => {
     expect(isDemoStaffId('s1')).toBe(true);
     expect(isDemoStaffId('s1/x')).toBe(false);
     expect(isDemoStaffId('staff1')).toBe(false);
+  });
+});
+
+describe('デモの簡易パスワード', () => {
+  const hash = demoPasswordHash('cutest1234');
+  it('合っていれば通し、違う・ハッシュ未設定・形の違うハッシュなら通さない', () => {
+    expect(checkDemoPassword('cutest1234', hash)).toBe(true);
+    expect(checkDemoPassword('cutest12345', hash)).toBe(false);
+    expect(checkDemoPassword('cutest1234', '')).toBe(false);
+    expect(checkDemoPassword('cutest1234', 'zz')).toBe(false);
+  });
+  it('設定ファイルにはパスワードそのものを置かない（ハッシュは64桁の16進）', () => {
+    expect(hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(hash).not.toContain('cutest');
   });
 });

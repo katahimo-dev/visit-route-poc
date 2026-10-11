@@ -95,7 +95,7 @@ export async function logout(): Promise<boolean> {
     waitForPendingWrites(db).then(() => true),
     new Promise<boolean>((r) => setTimeout(() => r(false), 3000)),
   ]);
-  if (!sent && !confirm('まだ送れていない記録があります。ログアウトすると消えます。ログアウトしますか？')) return false;
+  if (!sent && !confirm('未送信の記録があります。ログアウトすると消えます。ログアウトしますか？')) return false;
   // 端末のデータは onIdTokenChanged（ログインしていない状態になったとき）で消す
   await signOut(auth);
   return true;

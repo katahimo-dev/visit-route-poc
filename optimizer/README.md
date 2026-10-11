@@ -37,6 +37,7 @@ Functions のエミュレーターは、リポジトリ直下の `firebase.json`
 - 未割当の `reasons` は訪問ごとに1つ（`gender` → `ng_staff` → `unreachable` → `shift` → `time_window` の順）。
 - `routes` は入力の全スタッフを入力順に返す（訪問がなければ `stops: []`）。
 - 時刻は分に切り捨てて `HH:MM` にする。
+- スタッフの休み（`breaks`、ADR-0008）：訪問の作業時間は休みに重ならない。移動は休みにかかってよい（休み明けに向かう移動を許す）。OR-Tools 標準の休み（`SetBreakIntervalsOfVehicle`）は休み中の移動を許さないので使わず、「担当なら作業の開始が休みにかかる区間に入らない」制約を直接書いている。出力の待ち時間には休みの時間を含めない。
 
 ## デプロイ
 Firebase CLI の codebase 分割でデプロイする（`firebase deploy --only functions:optimizer`）。

@@ -1,13 +1,16 @@
-import type {
-  Client,
-  ClientPrivate,
-  EvalMatrix,
-  EvalStaff,
-  EvalVisit,
-  Org,
-  SolveRequest,
-  Staff,
-  Visit,
+import {
+  availabilityOf,
+  type Client,
+  type ClientPrivate,
+  type EvalMatrix,
+  type EvalStaff,
+  type EvalVisit,
+  type Org,
+  type Slot,
+  type SolveRequest,
+  type Staff,
+  shiftOf,
+  type Visit,
 } from '@vrp/shared';
 
 /**
@@ -23,7 +26,8 @@ export type Entities = {
   visits: (Visit & { id: string })[];
   /** 手作業案（スタッフ → 訪問IDの順番） */
   manualRoutes: Record<string, string[]>;
-  weekday: number;
+  /** その日の稼働時間帯の上書き（staffId → 時間帯。ADR-0008）。無いスタッフは基本の曜日と時間 */
+  availability: Map<string, { slots: Slot[] }>;
 };
 
 export type Prepared = {
@@ -52,21 +56,25 @@ export function prepare(e: Entities, date: string): Prepared {
   const staffReq: SolveRequest['staff'] = [];
   for (const s of e.staff) {
     if (!s.active) continue;
-    // その曜日の勤務か、手作業案で担当があるスタッフだけを対象にする
-    if (!s.workDays.includes(e.weekday) && !assigned.has(s.id)) continue;
+    // その日に稼働時間帯があるか、手作業案で担当があるスタッフだけを対象にする。
+    // 時間帯の無い日に担当がある人は、手作業案を評価するために基本の時間で入れる（AI案の条件違反として数える）
+    const shift = shiftOf(availabilityOf(s, date, e.availability.get(s.id)).slots);
+    if (!shift && !assigned.has(s.id)) continue;
+    const { shiftStart, shiftEnd, breaks } = shift ?? { shiftStart: s.shiftStart, shiftEnd: s.shiftEnd, breaks: [] };
     if (s.home.lat === null || s.home.lng === null) {
       skipped.push({ kind: 'staff', id: s.id, reason: 'no_location' });
       continue;
     }
     const p = add(`staff/${s.id}`, s.home.lat, s.home.lng);
-    staffIn.push({ staffId: s.id, homePointId: `staff/${s.id}`, shiftStart: s.shiftStart, shiftEnd: s.shiftEnd });
+    staffIn.push({ staffId: s.id, homePointId: `staff/${s.id}`, shiftStart, shiftEnd, breaks });
     staffReq.push({
       staffId: s.id,
       gender: s.gender,
       startPoint: p,
       endPoint: p,
-      shiftStart: s.shiftStart,
-      shiftEnd: s.shiftEnd,
+      shiftStart,
+      shiftEnd,
+      ...(breaks.length > 0 ? { breaks } : {}),
     });
   }
   const staffIds = new Set(staffIn.map((s) => s.staffId));

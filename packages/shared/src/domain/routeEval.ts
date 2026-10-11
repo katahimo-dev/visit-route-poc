@@ -25,6 +25,8 @@ export type EvalStaff = {
   homePointId: string;
   shiftStart: string;
   shiftEnd: string;
+  /** 勤務時間の中の休み（ADR-0008）。訪問の作業が重なれば条件違反 */
+  breaks?: { start: string; end: string }[];
 };
 
 export type StopTiming = {
@@ -42,7 +44,7 @@ export type RouteMetrics = {
   travelSeconds: number;
   meters: number;
   waitSeconds: number;
-  /** 時間の約束に遅れる・勤務時間を超える・到達不能の件数 */
+  /** 時間の約束に遅れる・勤務時間を超える・休みに重なる・到達不能の件数 */
   violations: number;
   stops: StopTiming[];
 };
@@ -83,6 +85,7 @@ export function evaluateRoute(staff: EvalStaff, visits: EvalVisit[], m: EvalMatr
     const late = start > latest + 0.01;
     if (late) violations++;
     const end = start + v.durationMinutes;
+    if ((staff.breaks ?? []).some((b) => start < hhmmToMinutes(b.end) && hhmmToMinutes(b.start) < end)) violations++;
     stops.push({ visitId: v.visitId, arrival, start, end, waitMinutes: wait, travelMinutes, late });
     travelSeconds += l.sec;
     meters += l.meters;

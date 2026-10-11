@@ -14,7 +14,7 @@ class LoginError extends Error {}
 
 async function signIn(token: string): Promise<void> {
   await signInWithCustomToken(auth, token).catch(() => {
-    throw new LoginError('ログインできませんでした。電波のよい場所でもう一度お試しください');
+    throw new LoginError('ログインできませんでした。電波の良い場所で再度お試しください');
   });
 }
 
@@ -70,7 +70,7 @@ export function LoginPage() {
               <input type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} />
             </label>
             <button type="button" className="btn btn-primary btn-big" disabled={!email || busy} onClick={send}>
-              コードを送る
+              コードを送信
             </button>
             <p className="sub">メールに届く6桁の数字を、この画面に入力するとログインできます。</p>
             <button type="button" className="btn" disabled={!email || busy} onClick={() => setStep('code')}>
@@ -96,10 +96,10 @@ export function LoginPage() {
               disabled={code.length !== 6 || busy}
               onClick={verify}
             >
-              ログインする
+              ログイン
             </button>
             <button type="button" className="btn" disabled={busy} onClick={() => setStep('email')}>
-              メールアドレスを直す・送り直す
+              メールアドレスの修正・再送信
             </button>
           </>
         )}
@@ -111,21 +111,44 @@ export function LoginPage() {
 }
 
 type DemoStaff = { id: string; name: string; visits: number };
+/** 入れたデモのパスワード（ログアウトして別の人で入り直すときに、もう一度打たなくてよいように。タブを閉じれば消える） */
+const DEMO_PW_KEY = 'vrp.demoPassword';
 
-/** デモで試す：管理者か、選んだスタッフとしてメールなしで入る（デモの事業所だけ。ADR-0007） */
+/**
+ * デモで試す：簡易パスワードを入れると、管理者か、選んだスタッフとしてメールなしで入れる
+ * （デモの事業所だけ。パスワードは不特定多数をはじくだけのもの。ADR-0007）
+ */
 function DemoLogin({ busy, run }: { busy: boolean; run: (fn: () => Promise<void>) => Promise<void> }) {
+  const [password, setPassword] = useState(sessionStorage.getItem(DEMO_PW_KEY) ?? '');
   const [staff, setStaff] = useState<DemoStaff[] | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const [opening, setOpening] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
+  const open = async (pw: string) => {
+    setOpening(true);
+    setError(null);
+    try {
+      const r = await call('demoStaffList', { password: pw, date: jstDate(Date.now()) });
+      sessionStorage.setItem(DEMO_PW_KEY, pw);
+      setStaff(r.staff);
+    } catch (e) {
+      sessionStorage.removeItem(DEMO_PW_KEY);
+      setError(messageOf(e));
+    } finally {
+      setOpening(false);
+    }
+  };
+
+  // 前に入れたパスワードがあれば、そのまま開く
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 最初の1回だけ
   useEffect(() => {
-    call('demoStaffList', { date: jstDate(Date.now()) })
-      .then((r) => setStaff(r.staff))
-      .catch((e) => setLoadError(messageOf(e)));
+    const saved = sessionStorage.getItem(DEMO_PW_KEY);
+    if (saved) open(saved);
   }, []);
 
   const enter = (as: 'admin' | 'staff', staffId: string | null = null) =>
     run(async () => {
-      const { token } = await call('demoSignIn', { as, staffId });
+      const { token } = await call('demoSignIn', { password, as, staffId });
       await signIn(token);
     });
 
@@ -133,23 +156,38 @@ function DemoLogin({ busy, run }: { busy: boolean; run: (fn: () => Promise<void>
     <div className="card stack">
       <h2>デモで試す</h2>
       <p className="sub">架空の事業所のデータで、メールなしで画面を試せます。</p>
-      <button type="button" className="btn" disabled={busy} onClick={() => enter('admin')}>
-        管理者として試す（PC向け）
-      </button>
-      <strong>スタッフとして試す（スマホ向け）</strong>
-      {loadError ? (
-        <p className="error">{loadError}</p>
-      ) : staff === null ? (
-        <p className="sub">読み込み中…</p>
+      {staff === null ? (
+        <form
+          className="stack"
+          onSubmit={(e) => {
+            e.preventDefault();
+            open(password);
+          }}
+        >
+          <label>
+            デモのパスワード
+            <input type="password" autoComplete="off" value={password} onChange={(e) => setPassword(e.target.value)} />
+          </label>
+          <button type="submit" className="btn" disabled={!password || opening}>
+            {opening ? '確認中…' : 'デモを開く'}
+          </button>
+          {error && <p className="error">{error}</p>}
+        </form>
       ) : (
-        <div className="demo-staff">
-          {staff.map((s) => (
-            <button key={s.id} type="button" className="btn" disabled={busy} onClick={() => enter('staff', s.id)}>
-              <span>{s.name}</span>
-              <span className="sub">{s.visits > 0 ? `きょう ${s.visits}件` : 'きょうは休み'}</span>
-            </button>
-          ))}
-        </div>
+        <>
+          <button type="button" className="btn" disabled={busy} onClick={() => enter('admin')}>
+            管理者として試す（PC向け）
+          </button>
+          <strong>スタッフとして試す（スマホ向け）</strong>
+          <div className="demo-staff">
+            {staff.map((s) => (
+              <button key={s.id} type="button" className="btn" disabled={busy} onClick={() => enter('staff', s.id)}>
+                <span>{s.name}</span>
+                <span className="sub">{s.visits > 0 ? `今日 ${s.visits}件` : '今日は休み'}</span>
+              </button>
+            ))}
+          </div>
+        </>
       )}
     </div>
   );

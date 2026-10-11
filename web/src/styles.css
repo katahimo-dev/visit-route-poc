@@ -358,25 +358,6 @@ th {
   border-radius: 14px;
   min-width: 0;
 }
-.route-item {
-  display: grid;
-  grid-template-columns: 16px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 0;
-  border-top: 1px solid var(--line);
-}
-.route-move {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.btn-icon {
-  padding: 0 8px;
-  font-size: 0.7rem;
-  line-height: 1.6;
-  border-radius: 8px;
-}
 .savebar {
   position: sticky;
   bottom: 0;
@@ -402,4 +383,199 @@ th {
   flex-direction: column;
   gap: 2px;
   padding: 10px;
+}
+
+/* 稼働時間帯 */
+.slot-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.slot-row select {
+  width: auto;
+  min-width: 96px;
+}
+.avail-table {
+  border-collapse: separate;
+  border-spacing: 2px;
+  font-size: 0.75rem;
+}
+.avail-table th,
+.avail-table td {
+  padding: 0;
+  border: 0;
+  text-align: center;
+}
+.avail-name {
+  position: sticky;
+  left: 0;
+  background: var(--card);
+  text-align: left !important;
+  padding-right: 8px !important;
+  white-space: nowrap;
+  font-size: 0.85rem;
+  z-index: 1;
+}
+.avail-day {
+  min-width: 38px;
+  font-weight: 600;
+  color: var(--sub);
+}
+.avail-day.dow-0 {
+  color: var(--danger);
+}
+.avail-day.dow-6 {
+  color: #4a7fc1;
+}
+.avail-day.is-today {
+  background: #fde3dd;
+  border-radius: 6px;
+}
+.avail-btn {
+  width: 100%;
+  min-height: 40px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  padding: 2px;
+  border: 1.5px solid transparent;
+  border-radius: 6px;
+  background: #faf6f2;
+  color: var(--sub);
+  font: inherit;
+  font-size: 0.72rem;
+  line-height: 1.15;
+  cursor: pointer;
+  position: relative;
+}
+.avail-btn.is-off {
+  color: #c4b5aa;
+}
+.avail-btn.is-override {
+  background: #fde3dd;
+  color: var(--primary-dark);
+  font-weight: 700;
+}
+.avail-btn.is-past {
+  opacity: 0.55;
+}
+.avail-btn.is-picked {
+  border-color: var(--primary);
+}
+.avail-mark {
+  color: var(--primary);
+  font-size: 0.6rem;
+}
+.avail-btn .avail-mark {
+  position: absolute;
+  top: 1px;
+  right: 2px;
+}
+.my-avail {
+  border-bottom: 1px solid var(--line);
+}
+.my-avail:last-child {
+  border-bottom: 0;
+}
+.my-avail-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  width: 100%;
+  padding: 12px 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.my-avail-date {
+  min-width: 112px;
+  font-weight: 700;
+}
+.my-avail-date.dow-0 {
+  color: var(--danger);
+}
+.my-avail-date.dow-6 {
+  color: #4a7fc1;
+}
+
+/* 予定：ドラッグと赤い枠 */
+.chip-red {
+  background: #fbe1dd;
+  color: var(--danger);
+  font-weight: 700;
+}
+.red-text {
+  color: var(--danger);
+  font-weight: 700;
+}
+.staff-select.is-red {
+  border-color: var(--danger);
+  border-left-width: 6px;
+  box-shadow: 0 0 0 1px var(--danger);
+}
+.route-col.is-off {
+  background: #faf6f2;
+}
+.route-col-none {
+  border-top-color: var(--warn);
+  background: #fdf7ea;
+}
+.route-col.is-drop {
+  outline: 3px dashed var(--primary);
+  outline-offset: 2px;
+}
+.route-col.is-drop.is-red {
+  outline-color: var(--danger);
+  background: #fdf0ee;
+}
+.drop-warning {
+  color: var(--danger);
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+.route-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 2px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+  cursor: grab;
+}
+.route-item.is-red {
+  border-color: var(--danger);
+  background: #fdf0ee;
+}
+.route-item.is-dragging {
+  opacity: 0.4;
+}
+.segmented {
+  display: inline-flex;
+  border: 2px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.segmented button {
+  border: 0;
+  padding: 8px 14px;
+  background: var(--card);
+  font: inherit;
+  font-size: 0.9rem;
+  color: var(--sub);
+  cursor: pointer;
+}
+.segmented button + button {
+  border-left: 2px solid var(--line);
+}
+.segmented button.is-on {
+  background: #fde3dd;
+  color: var(--primary-dark);
+  font-weight: 700;
 }

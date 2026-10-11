@@ -29,7 +29,7 @@ export const inviteMember = onCall({ region: REGION }, async (req) => {
   const user = await auth.getUserByEmail(input.email).catch(() => auth.createUser({ email: input.email }));
   const existing = user.customClaims ?? {};
   if (existing.orgId && existing.orgId !== orgId) {
-    throw new HttpsError('failed-precondition', 'このメールアドレスはほかの事業所で使われています');
+    throw new HttpsError('failed-precondition', 'このメールアドレスは他の事業所で使用されています');
   }
   if (existing.role === 'operator') throw new HttpsError('failed-precondition', 'このメールアドレスには設定できません');
   await auth.setCustomUserClaims(user.uid, {

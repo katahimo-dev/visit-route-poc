@@ -1,10 +1,11 @@
 import type { Client, PlanMetrics, SolveResponse, Staff, UnassignedReason, Visit } from '@vrp/shared';
-import { where } from 'firebase/firestore';
+import { doc, updateDoc, where } from 'firebase/firestore';
 import { useMemo, useState } from 'react';
 import { type MapLine, type MapPoint, RouteMap } from '../../components/RouteMap';
 import { useToast } from '../../components/Toast';
 import { call } from '../../lib/api';
 import { colorOf, initialOf } from '../../lib/colors';
+import { db } from '../../lib/firebase';
 import { useOrgCollection, type WithId } from '../../lib/useCollection';
 import { DateField, formError, hasLocation, tomorrow, useAdmin } from './common';
 
@@ -17,6 +18,8 @@ type PlanRun = {
   travelMode: string;
   computeMillis: number;
   solverVersion: string;
+  /** 移動時間に地図API（Google）を使ったか。古い結果には無い */
+  mapsApi?: boolean;
   manualRoutes: Record<string, string[]>;
   manualMinutesSpent: number | null;
   result: SolveResponse;
@@ -37,7 +40,7 @@ const r1 = (n: number) => Math.round(n * 10) / 10;
 const sign = (n: number) => (n > 0 ? `+${r1(n)}` : String(r1(n)));
 
 export default function PlanPage() {
-  const { orgId, terms, isOperator } = useAdmin();
+  const { orgId, org, terms, isOperator } = useAdmin();
   const toast = useToast();
   const [date, setDate] = useState(tomorrow);
   const runsQ = useOrgCollection<PlanRun>(orgId, 'planRuns', [where('date', '==', date)], date);
@@ -54,6 +57,17 @@ export default function PlanPage() {
   const staffById = useMemo(() => new Map((staffQ.rows ?? []).map((s) => [s.id, s])), [staffQ.rows]);
   const clientById = useMemo(() => new Map((clientsQ.rows ?? []).map((c) => [c.id, c])), [clientsQ.rows]);
   const visitById = useMemo(() => new Map((visitsQ.rows ?? []).map((v) => [v.id, v])), [visitsQ.rows]);
+
+  const useMaps = org?.useMapsApi !== false;
+  const setUseMaps = async (v: boolean) => {
+    setError(null);
+    try {
+      await updateDoc(doc(db, 'orgs', orgId), { useMapsApi: v });
+      toast(v ? 'Google の地図APIを使います' : '直線距離からの概算にします');
+    } catch (e) {
+      setError(formError(e));
+    }
+  };
 
   const staffName = (id: string) => staffById.get(id)?.name ?? '（不明）';
   const visitLabel = (id: string) => {
@@ -72,7 +86,7 @@ export default function PlanPage() {
         orgId: isOperator ? orgId : null,
       });
       setPicked(runId);
-      toast('AI案を作りました');
+      toast('AI案を作成しました');
     } catch (e) {
       setError(formError(e));
     } finally {
@@ -141,14 +155,37 @@ export default function PlanPage() {
         <div className="row" style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <DateField value={date} onChange={setDate} />
           <button type="button" className="btn btn-primary" disabled={busy} onClick={create}>
-            {busy ? '作っています…（数十秒かかります）' : 'AI案を作る'}
+            {busy ? '作成中…（数十秒かかります）' : 'AI案を作成'}
           </button>
         </div>
-        <p className="sub">AI案は予定を書き換えません。手作業案と同じ移動時間の予測で、くらべるだけです。</p>
+        <div className="row" style={{ flexWrap: 'wrap' }}>
+          <span className="sub">移動時間の求め方：</span>
+          <div className="segmented">
+            <button
+              type="button"
+              aria-pressed={useMaps}
+              className={useMaps ? 'is-on' : ''}
+              onClick={() => setUseMaps(true)}
+            >
+              Google の地図API（実際の道路）
+            </button>
+            <button
+              type="button"
+              aria-pressed={!useMaps}
+              className={useMaps ? '' : 'is-on'}
+              onClick={() => setUseMaps(false)}
+            >
+              直線距離からの概算（無料）
+            </button>
+          </div>
+        </div>
+        <p className="sub">
+          AI案は予定を書き換えません。手作業案と同じ移動時間の予測で比較するだけです。地図APIは使った分だけ費用がかかります（同じ区間は30日間使い回します）。
+        </p>
         {error && <p className="error">{error}</p>}
         {runs.length > 1 && (
           <label style={{ maxWidth: 360 }}>
-            作った結果（新しい順）
+            作成した結果（新しい順）
             <select value={run?.id ?? ''} onChange={(e) => setPicked(e.target.value)}>
               {runs.map((r) => (
                 <option key={r.id} value={r.id}>
@@ -168,10 +205,11 @@ export default function PlanPage() {
         <>
           <div className="card stack">
             <div className="spread">
-              <h3>手作業とAIのくらべ</h3>
+              <h3>手作業とAIの比較</h3>
               <span className="sub">
                 {new Date(run.createdAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })} ／ 計算{' '}
-                {r1(run.computeMillis / 1000)}秒
+                {r1(run.computeMillis / 1000)}秒 ／ 移動時間{' '}
+                {run.mapsApi === false ? '直線距離からの概算' : run.mapsApi ? 'Google の地図API' : '—'}
                 {run.manualMinutesSpent != null && ` ／ 手作業のルート作成 ${run.manualMinutesSpent}分`}
               </span>
             </div>
@@ -179,9 +217,9 @@ export default function PlanPage() {
               <thead>
                 <tr>
                   <th />
-                  <th className="num">いま（手作業）</th>
+                  <th className="num">現在（手作業）</th>
                   <th className="num">AI</th>
-                  <th className="num">ちがい（AI−いま）</th>
+                  <th className="num">差（AI−現在）</th>
                 </tr>
               </thead>
               <tbody>

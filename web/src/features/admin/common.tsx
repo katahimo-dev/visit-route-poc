@@ -19,7 +19,7 @@ export function formError(e: unknown): string {
   if (e instanceof Error && 'issues' in e) {
     const issues = (e as unknown as { issues: { path: PropertyKey[]; message: string }[] }).issues;
     const i = issues[0];
-    return i ? `${i.path.map(String).join('.')}：${i.message}` : '入力を確かめてください';
+    return i ? `${i.path.map(String).join('.')}：${i.message}` : '入力内容を確認してください';
   }
   return messageOf(e);
 }
@@ -79,7 +79,7 @@ export function PlaceEditor({ value, onChange }: { value: Place; onChange: (p: P
     try {
       const r = await call('geocodeAddress', { address: value.address });
       setCandidates(r.candidates);
-      if (r.candidates.length === 0) setError('候補が見つかりませんでした。地図をクリックして位置を決めてください');
+      if (r.candidates.length === 0) setError('候補が見つかりませんでした。地図をクリックして位置を指定してください');
     } catch (e) {
       setError(formError(e));
     } finally {
@@ -99,11 +99,11 @@ export function PlaceEditor({ value, onChange }: { value: Place; onChange: (p: P
       </label>
       <div className="row">
         <button type="button" className="btn btn-small" disabled={busy || !value.address.trim()} onClick={search}>
-          {busy ? '探しています…' : '住所から位置を出す'}
+          {busy ? '検索中…' : '住所から位置を検索'}
         </button>
         {hasLocation(value) && (
           <button type="button" className="btn btn-small" onClick={() => onChange({ ...value, lat: null, lng: null })}>
-            位置を消す
+            位置を削除
           </button>
         )}
         <span className="sub">

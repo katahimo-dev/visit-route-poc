@@ -2,6 +2,7 @@ export * from './contracts/callables';
 export * from './contracts/codes';
 export * from './contracts/documents';
 export * from './contracts/optimizer';
+export * from './domain/availability';
 export * from './domain/geo';
 export * from './domain/routeEval';
 export * from './domain/terms';

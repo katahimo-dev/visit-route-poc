@@ -34,6 +34,13 @@ describe('evaluateRoute', () => {
     expect(r.stops[1]?.late).toBe(true);
     expect(r.violations).toBe(1);
   });
+
+  it('休みに作業が重なったら違反に数える（移動が休みにかかるのはよい）', () => {
+    const lunch = { ...staff, breaks: [{ start: '10:30', end: '11:00' }] };
+    expect(evaluateRoute(lunch, [a, b], m).violations).toBe(1);
+    const morning = { ...staff, breaks: [{ start: '08:30', end: '09:00' }] };
+    expect(evaluateRoute(morning, [a, b], m).violations).toBe(0);
+  });
 });
 
 describe('evaluatePlan', () => {

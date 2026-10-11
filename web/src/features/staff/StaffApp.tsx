@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Route, Routes } from 'react-router-dom';
+import { MyAvailabilityPage } from '../availability/MyAvailabilityPage';
 import { AttendancePage } from './AttendancePage';
 import { HomePage } from './HomePage';
 import { ShiftTracker } from './ShiftTracker';
@@ -22,19 +23,20 @@ function useOnline() {
   return online;
 }
 
-/** スタッフのスマホ画面（ホーム／よてい／きんむ） */
+/** スタッフのスマホ画面（ホーム／よてい／きんむ／じかん） */
 export default function StaffApp() {
   const day = useStaffDay();
   const online = useOnline();
   return (
     <ShiftTracker onShift={day.onShift} stops={day.stops}>
       <div className="staff-shell stack">
-        {!online && <div className="offline">電波がありません。記録はスマホに残り、つながったら送られます</div>}
+        {!online && <div className="offline">電波がありません。記録はスマホに保存し、電波が戻ると送信します</div>}
         <Routes>
           <Route index element={<HomePage day={day} />} />
           <Route path="today" element={<TodayPage day={day} />} />
           <Route path="visit/:visitId" element={<VisitPage day={day} />} />
           <Route path="attendance" element={<AttendancePage date={day.date} />} />
+          <Route path="availability" element={<MyAvailabilityPage />} />
         </Routes>
       </div>
       <nav className="tabbar">
@@ -42,10 +44,13 @@ export default function StaffApp() {
           <span className="icon">🏠</span>ホーム
         </NavLink>
         <NavLink to="/staff/today">
-          <span className="icon">🗓</span>よてい
+          <span className="icon">🗓</span>予定
         </NavLink>
         <NavLink to="/staff/attendance">
-          <span className="icon">🕘</span>きんむ
+          <span className="icon">🕘</span>勤務
+        </NavLink>
+        <NavLink to="/staff/availability">
+          <span className="icon">📅</span>シフト
         </NavLink>
       </nav>
     </ShiftTracker>

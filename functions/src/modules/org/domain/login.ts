@@ -125,3 +125,15 @@ export function demoStaffOf(
     .slice(0, MAX_DEMO_STAFF)
     .map((s) => ({ id: s.id, name: s.name, visits: counts.get(s.id) ?? 0 }));
 }
+
+/**
+ * デモの簡易パスワード（不特定多数のアクセスをはじくためだけのもの。アカウントの保護ではない）。
+ * 設定ファイルにはハッシュ（固定の前置き＋SHA-256）だけを置く
+ */
+export const demoPasswordHash = (password: string): string =>
+  createHash('sha256').update(`visit-route-demo:${password}`).digest('hex');
+
+export function checkDemoPassword(password: string, expectedHash: string): boolean {
+  if (!/^[0-9a-f]{64}$/.test(expectedHash)) return false;
+  return timingSafeEqual(Buffer.from(demoPasswordHash(password), 'hex'), Buffer.from(expectedHash, 'hex'));
+}

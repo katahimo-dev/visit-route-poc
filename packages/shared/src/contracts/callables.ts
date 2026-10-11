@@ -23,7 +23,10 @@ export const verifyLoginCodeRequest = z.object({
 });
 export const signInTokenResponse = z.object({ token: z.string() });
 /** デモ用のログイン（デモの事業所が設定された環境だけ）。staffId は as=staff のとき誰として入るか（null なら最初の人） */
+/** デモの簡易パスワード（不特定多数をはじくだけ） */
+const demoPassword = z.string().min(1, 'パスワードを入力してください').max(100);
 export const demoSignInRequest = z.object({
+  password: demoPassword,
   as: z.enum(['admin', 'staff']),
   staffId: z
     .string()
@@ -32,7 +35,7 @@ export const demoSignInRequest = z.object({
     .default(null),
 });
 /** デモ用：ログインする人を選ぶための、デモの事業所のスタッフ（架空の人物だけ）。date の訪問件数つき */
-export const demoStaffListRequest = z.object({ date: dateSchema });
+export const demoStaffListRequest = z.object({ password: demoPassword, date: dateSchema });
 export const demoStaffListResponse = z.object({
   staff: z.array(z.object({ id: z.string(), name: z.string(), visits: z.number().int() })),
 });

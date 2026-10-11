@@ -52,12 +52,14 @@ export async function baseMatrix(
   points: LatLng[],
   mode: TravelMode,
   departAtMs: number,
+  /** 事業所の設定で地図APIを使わないときは false（すべて概算） */
+  useMaps = true,
 ): Promise<BaseLeg[][]> {
   const band = timeBandOf(hhmmToMinutes(jstHhmm(Math.max(departAtMs, Date.now()))));
   const out: (BaseLeg | null)[][] = points.map((_, i) =>
     points.map((__, j) => (i === j ? { seconds: 0, meters: 0, source: 'routes_api' as const } : null)),
   );
-  const key = mapsKey();
+  const key = useMaps ? mapsKey() : null;
   if (!key) return fillEstimates(out, points, mode, 'fallback');
 
   const pairs = neighborPairs(points);

@@ -35,6 +35,36 @@ def _travel(req: SolveRequest, a: int, b: int) -> int:
     return UNREACHABLE if t < 0 else t
 
 
+def _forbid_breaks(
+    routing: pywrapcp.RoutingModel,
+    time_dim: pywrapcp.RoutingDimension,
+    index: int,
+    duration: int,
+    req: SolveRequest,
+    allowed: list[int],
+) -> None:
+    """担当スタッフの休みに、この訪問の作業 [開始, 開始+所要) が重ならないようにする（ADR-0008）。
+
+    制約は「スタッフ k が担当する ⇒ 開始 ∉ (休み開始 − 所要, 休み終了)」。移動・待ちは縛らない。
+    OR-Tools 標準の SetBreakIntervalsOfVehicle は休み中の移動を許さない（休みの長さぶん
+    遊びが要る）ため使わず、担当と開始時刻の組に対する制約として直接書く。
+    """
+    solver = routing.solver()
+    cumul = time_dim.CumulVar(index)
+    vehicle = routing.VehicleVar(index)
+    for k in allowed:
+        for bs, be in req.staff[k].breaks:
+            lo, hi = bs - duration + 1, be - 1  # 重なる開始時刻の範囲（両端を含む）
+            if hi < lo:
+                continue
+            if len(allowed) == 1:
+                cumul.RemoveInterval(lo, hi)  # 担当が1人に決まっている（順番だけのモードなど）
+                continue
+            on_k = solver.IsEqualCstVar(vehicle, k)
+            overlaps = solver.IsBetweenVar(cumul, lo, hi)
+            solver.Add(on_k + overlaps <= 1)
+
+
 def _solve_model(req: SolveRequest) -> RawSolution:
     n_v = len(req.visits)
     n_s = len(req.staff)
@@ -102,6 +132,7 @@ def _solve_model(req: SolveRequest) -> RawSolution:
         allowed = [i for i, s in enumerate(req.staff) if s.staff_id in ok_ids]
         routing.VehicleVar(index).SetValues([-1, *allowed])
         routing.AddDisjunction([index], DROP_PENALTY)
+        _forbid_breaks(routing, time_dim, index, v.duration_seconds, req, allowed)
 
     params = pywrapcp.DefaultRoutingSearchParameters()
     params.first_solution_strategy = routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC

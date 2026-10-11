@@ -64,7 +64,7 @@ describe('prepare', () => {
         ]),
         visits: [visit('v1', 'c1', 's1'), visit('v2', 'c2', 's1')],
         manualRoutes: { s1: ['v1', 'v2'] },
-        weekday: 1,
+        availability: new Map(),
       },
       '2026-10-19',
     );
@@ -80,9 +80,63 @@ describe('prepare', () => {
 
   it('勤務日でも担当でもないスタッフは対象外', () => {
     const p = prepare(
-      { org, staff: [staff('s1', 38.2, [2])], clients: new Map(), visits: [], manualRoutes: {}, weekday: 1 },
+      {
+        org,
+        staff: [staff('s1', 38.2, [2])],
+        clients: new Map(),
+        visits: [],
+        manualRoutes: {},
+        availability: new Map(),
+      },
       '2026-10-19',
     );
     expect(p.staffIn).toEqual([]);
+  });
+});
+
+describe('prepare：稼働時間帯（ADR-0008）', () => {
+  const base = { org, clients: new Map(), visits: [], manualRoutes: {} };
+  it('上書きがあれば、その日の時間帯を勤務時間に、あいだの抜けを休みにする', () => {
+    const p = prepare(
+      {
+        ...base,
+        staff: [staff('s1', 38.2)],
+        availability: new Map([
+          [
+            's1',
+            {
+              slots: [
+                { start: '09:00', end: '12:00' },
+                { start: '14:00', end: '17:30' },
+              ],
+            },
+          ],
+        ]),
+      },
+      '2026-10-19',
+    );
+    expect(p.request.staff[0]).toMatchObject({
+      shiftStart: '09:00',
+      shiftEnd: '17:30',
+      breaks: [{ start: '12:00', end: '14:00' }],
+    });
+    expect(p.staffIn[0]?.breaks).toEqual([{ start: '12:00', end: '14:00' }]);
+  });
+  it('勤務日でも休みに上書きした日は対象外。勤務日でない日に時間帯を入れれば対象', () => {
+    const off = prepare(
+      { ...base, staff: [staff('s1', 38.2)], availability: new Map([['s1', { slots: [] }]]) },
+      '2026-10-19',
+    );
+    expect(off.staffIn).toEqual([]);
+    const extra = prepare(
+      {
+        ...base,
+        staff: [staff('s1', 38.2, [2])],
+        availability: new Map([['s1', { slots: [{ start: '10:00', end: '15:00' }] }]]),
+      },
+      '2026-10-19',
+    );
+    expect(extra.request.staff[0]).toMatchObject({ shiftStart: '10:00', shiftEnd: '15:00' });
+    expect(extra.request.staff[0]).not.toHaveProperty('breaks');
   });
 });

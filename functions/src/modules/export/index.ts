@@ -39,7 +39,7 @@ type PlanRunDoc = {
  */
 export const exportStudyData = onCall({ region: REGION, timeoutSeconds: 120 }, async (req) => {
   const c = callerOf(req);
-  if (c.role !== 'operator') throw new HttpsError('permission-denied', 'この操作は運営者だけができます');
+  if (c.role !== 'operator') throw new HttpsError('permission-denied', 'この操作は運営者のみ可能です');
   const input = parse(exportStudyDataRequest, req.data);
   const orgIds = input.orgId ? [input.orgId] : (await db.collection('orgs').get()).docs.map((d) => d.id);
   const plans: (string | number | null)[][] = [
