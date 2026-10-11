@@ -34,7 +34,7 @@ export type Prepared = {
   points: { id: string; lat: number; lng: number }[];
   staffIn: EvalStaff[];
   visitsIn: Record<string, EvalVisit>;
-  skipped: { kind: 'staff' | 'visit'; id: string; reason: 'no_location' | 'not_working' }[];
+  skipped: { kind: 'staff' | 'visit'; id: string; reason: 'no_location' | 'not_working' | 'inactive' }[];
   request: Omit<SolveRequest, 'matrix' | 'requestId'>;
 };
 
@@ -55,7 +55,11 @@ export function prepare(e: Entities, date: string): Prepared {
   const staffIn: EvalStaff[] = [];
   const staffReq: SolveRequest['staff'] = [];
   for (const s of e.staff) {
-    if (!s.active) continue;
+    if (!s.active) {
+      // 休止中の人に手作業の担当が残っていれば知らせる（計算には入れない）
+      if (assigned.has(s.id)) skipped.push({ kind: 'staff', id: s.id, reason: 'inactive' });
+      continue;
+    }
     // その日に稼働時間帯があるか、手作業案で担当があるスタッフだけを対象にする。
     // 時間帯の無い日（休み）に担当がある人は、手作業案を評価するために基本の時間で入れるが、
     // 最適化では訪問を持たせず（maxVisits 0）、評価では担当1件ごとに条件違反にする

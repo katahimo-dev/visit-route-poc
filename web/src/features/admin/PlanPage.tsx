@@ -51,7 +51,11 @@ const REASON_LABELS: Record<UnassignedReason, string> = {
   ng_staff: 'NGの組み合わせ',
   unreachable: '行けない場所',
 };
-const SKIP_LABELS: Record<string, string> = { no_location: '位置が未登録', not_working: '勤務日ではない' };
+const SKIP_LABELS: Record<string, string> = {
+  no_location: '位置が未登録',
+  not_working: '勤務日ではない',
+  inactive: '休止中',
+};
 
 const r0 = (n: number) => Math.round(n);
 const r1 = (n: number) => Math.round(n * 10) / 10;
@@ -176,9 +180,31 @@ export default function PlanPage() {
 
   const stopCards = (staffId: string, side: 'manual' | 'ai') => {
     const view = views?.[side][staffId];
-    if (!view) return <span className="sub">訪問なし</span>;
+    if (!view) {
+      const manualIds = run?.manualRoutes?.[staffId] ?? [];
+      const skip = run?.skipped.find((x) => x.kind === 'staff' && x.id === staffId);
+      if (side === 'manual' && manualIds.length > 0)
+        return (
+          <div className="stack" style={{ gap: 4 }}>
+            <span className="chip chip-red" style={{ alignSelf: 'flex-start' }}>
+              計算に入れていません（{skip ? (SKIP_LABELS[skip.reason] ?? skip.reason) : '対象外'}）
+            </span>
+            {manualIds.map((id) => (
+              <span key={id} className="sub">
+                {visitLabel(id)}
+              </span>
+            ))}
+          </div>
+        );
+      return <span className="sub">訪問なし</span>;
+    }
     return (
       <div className="stack" style={{ gap: 0 }}>
+        {view.off && (
+          <span className="chip chip-red" style={{ alignSelf: 'flex-start' }}>
+            この日は休み（稼働時間帯なし）なのに担当あり
+          </span>
+        )}
         {view.stops.map((s, i) => (
           <div key={s.visitId}>
             <Leg
@@ -186,10 +212,20 @@ export default function PlanPage() {
               estimate={hasEstimate ? s.estimateMinutes : null}
               from={i === 0 ? '自宅から' : null}
             />
-            <StopCard stop={s} client={clientOf(s.visitId)} moved={movedLabel(s.visitId, staffId, side)} />
+            <StopCard
+              stop={s}
+              off={view.off}
+              client={clientOf(s.visitId)}
+              moved={movedLabel(s.visitId, staffId, side)}
+            />
           </div>
         ))}
-        <Leg minutes={view.backMinutes} estimate={hasEstimate ? view.backEstimateMinutes : null} from="自宅まで" />
+        <Leg
+          minutes={view.backMinutes}
+          estimate={hasEstimate ? view.backEstimateMinutes : null}
+          from="自宅まで"
+          warn={view.overShift ? '勤務終了を過ぎる' : null}
+        />
       </div>
     );
   };
@@ -261,7 +297,8 @@ export default function PlanPage() {
               ：2地点の直線距離を1.3倍して道のりとし、時速25kmで割った時間です。川・山・一方通行・渋滞を知らないので、回り道の多い区間ではずれます。
             </div>
             <div className="sub">
-              Google で作った AI案には、区間ごとに概算の値を「（概算 ◯分）」と並べます。切り替えは次に作る
+              Google で作った AI案には、Google で測った区間にだけ、同じ区間の概算を「（概算
+              ◯分）」と並べます（印の無い区間は、概算を Google の結果で補正した値）。切り替えは次に作る
               AI案から効きます。
             </div>
           </div>
@@ -298,7 +335,7 @@ export default function PlanPage() {
                 )}
                 {hasEstimate && (
                   <span className="sub">
-                    概算で数えると {r0(estManual)}分 → {r0(estAi)}分
+                    全区間を概算で数えると {r0(estManual)}分 → {r0(estAi)}分
                   </span>
                 )}
               </div>
@@ -323,7 +360,7 @@ export default function PlanPage() {
                 {staffIds.map((id) => {
                   const pm = m.perStaff[id];
                   const pa = a.perStaff[id];
-                  const diff = ((pa?.travelSeconds ?? 0) - (pm?.travelSeconds ?? 0)) / 60;
+                  const diff = r0(((pa?.travelSeconds ?? 0) - (pm?.travelSeconds ?? 0)) / 60);
                   return (
                     <div key={id} className="compare-row" style={{ borderTopColor: colorOfStaff.get(id) }}>
                       <button
@@ -340,7 +377,7 @@ export default function PlanPage() {
                           移動 {r0((pm?.travelSeconds ?? 0) / 60)}分 → {r0((pa?.travelSeconds ?? 0) / 60)}分
                         </span>
                         <span className={`chip ${diff < 0 ? 'chip-ok' : diff > 0 ? 'chip-warn' : ''}`}>
-                          {diff === 0 ? '差なし' : `${sign(r0(diff))}分`}
+                          {diff === 0 ? '差なし' : `${sign(diff)}分`}
                         </span>
                         {(pm?.violations ?? 0) + (pa?.violations ?? 0) > 0 && (
                           <span className="sub red-text">
@@ -427,19 +464,41 @@ function Kpi({ label, before, after, unit }: { label: string; before: number; af
 }
 
 /** 訪問のあいだの移動。地図APIの結果なら概算の値も並べる */
-function Leg({ minutes, estimate, from }: { minutes: number; estimate: number | null; from: string | null }) {
+function Leg({
+  minutes,
+  estimate,
+  from,
+  warn = null,
+}: {
+  minutes: number;
+  estimate: number | null;
+  from: string | null;
+  warn?: string | null;
+}) {
   return (
-    <div className="leg-line">
+    <div className={`leg-line ${warn ? 'red-text' : ''}`}>
       {from ? `${from} ` : '↓ 移動 '}
       {r0(minutes)}分{estimate !== null && <span className="sub">（概算 {r0(estimate)}分）</span>}
+      {warn && `（${warn}）`}
     </div>
   );
 }
 
 /** 予定画面と同じ見た目の訪問カード */
-function StopCard({ stop, client, moved }: { stop: StopView; client: Client | undefined; moved: string | null }) {
+function StopCard({
+  stop,
+  off,
+  client,
+  moved,
+}: {
+  stop: StopView;
+  off: boolean;
+  client: Client | undefined;
+  moved: string | null;
+}) {
+  const red = stop.late || off;
   return (
-    <div className={`route-item ${stop.late ? 'is-red' : ''} ${moved ? 'is-moved' : ''}`} style={{ cursor: 'default' }}>
+    <div className={`route-item ${red ? 'is-red' : moved ? 'is-moved' : ''}`} style={{ cursor: 'default' }}>
       <div className={`sub nowrap ${stop.late ? 'red-text' : ''}`}>
         {minutesToHhmm(stop.start)}〜{minutesToHhmm(stop.end)}
         {stop.late && '（遅れ）'}

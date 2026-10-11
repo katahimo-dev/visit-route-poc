@@ -62,24 +62,35 @@ describe('evaluatePlan', () => {
 });
 
 describe('routeViews', () => {
-  const est: EvalMatrix = { ...m, seconds: m.seconds.map((row) => row.map((x) => x / 2)) };
-  it('手作業案・AI案を同じ形で、区間の移動と概算の値を並べる', () => {
-    const v = routeViews({ s1: ['va', 'vb'] }, [staff], { va: a, vb: b }, m, est);
+  const half = m.seconds.map((row) => row.map((x) => x / 2));
+  // 自宅→a と b→自宅 だけ地図APIで測った
+  const measured = [
+    [false, true, false],
+    [false, false, false],
+    [false, false, false],
+  ];
+  measured[2]![0] = true;
+  it('地図APIで測った区間だけ概算を並べ、合計は全区間を概算で数える', () => {
+    const v = routeViews({ s1: ['va', 'vb'] }, [staff], { va: a, vb: b }, m, { seconds: half, measured });
     expect(v.s1?.stops).toEqual([
       { visitId: 'va', start: 540, end: 600, travelMinutes: 10, estimateMinutes: 5, late: false },
-      { visitId: 'vb', start: 615, end: 675, travelMinutes: 15, estimateMinutes: 7.5, late: false },
+      { visitId: 'vb', start: 615, end: 675, travelMinutes: 15, estimateMinutes: null, late: false },
     ]);
     expect(v.s1).toMatchObject({
       backMinutes: 20,
       backEstimateMinutes: 10,
       travelMinutes: 45,
       estimateTravelMinutes: 22.5,
+      off: false,
+      overShift: false,
     });
   });
-  it('概算が無ければ null。訪問の無い人は出さない', () => {
+  it('概算が無ければ null。訪問の無い人は出さない。休みの日の担当・勤務終了の超過に印', () => {
     const v = routeViews({ s1: ['va'] }, [staff, { ...staff, staffId: 's2' }], { va: a }, m, null);
     expect(v.s1?.stops[0]?.estimateMinutes).toBeNull();
     expect(v.s1?.estimateTravelMinutes).toBeNull();
     expect(v.s2).toBeUndefined();
+    const late = routeViews({ s1: ['va'] }, [{ ...staff, shiftEnd: '10:05', off: true }], { va: a }, m, null);
+    expect(late.s1).toMatchObject({ off: true, overShift: true });
   });
 });

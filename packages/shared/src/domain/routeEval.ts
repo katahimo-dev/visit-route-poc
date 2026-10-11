@@ -170,7 +170,10 @@ export function evaluatePlan(
   return out;
 }
 
-/** 画面に出す1件の訪問（分は 0時から）。estimateMinutes は直線距離の概算での前の区間の移動（比べる値が無ければ null） */
+/**
+ * 画面に出す1件の訪問（分は 0時から）。
+ * estimateMinutes は、前の区間を地図APIで測ったときだけ、同じ区間の直線距離の概算（それ以外は null）
+ */
 export type StopView = {
   visitId: string;
   start: number;
@@ -182,49 +185,75 @@ export type StopView = {
 /** 画面に出す1人のルート（手作業案・AI案を同じ形で並べる） */
 export type RouteView = {
   stops: StopView[];
-  /** 最後の訪問から自宅まで */
+  /** 最後に着いた訪問から自宅まで */
   backMinutes: number;
   backEstimateMinutes: number | null;
   /** 自宅→訪問→自宅の移動の合計 */
   travelMinutes: number;
+  /** 全区間を直線距離の概算で数えた合計（比べる値が無ければ null） */
   estimateTravelMinutes: number | null;
+  /** その日は休み（稼働時間帯なし）なのに担当がある */
+  off: boolean;
+  /** 帰りが勤務終了を過ぎる */
+  overShift: boolean;
 };
+
+/** 概算の行列と、区間ごとに地図APIで測ったか（measured[i][j]。添字は m.index と同じ） */
+export type EstimateMatrix = { seconds: number[][]; measured: boolean[][] };
 
 const r1 = (n: number) => Math.round(n * 10) / 10;
 
 /**
- * 手作業案・AI案を、同じ行列で時刻計算した表示用のルート（スタッフ別）。
- * estimate を渡すと、同じ順番を概算の行列で計算した区間の移動も並べる（地図APIとの差を見せる）
+ * 手作業案・AI案を、同じ行列で時刻計算した表示用のルート（スタッフ別。evaluateRoute と同じ計算）。
+ * estimate を渡すと、地図APIで測った区間に同じ区間の概算を並べ、全区間を概算で数えた合計も出す
  */
 export function routeViews(
   routes: Record<string, string[]>,
   staff: EvalStaff[],
   visitsById: Record<string, EvalVisit>,
   m: EvalMatrix,
-  estimate: EvalMatrix | null,
+  estimate: EstimateMatrix | null,
 ): Record<string, RouteView> {
+  const idx = (pointId: string) => m.index[pointId];
+  const est = (from: string, to: string): { minutes: number; measured: boolean } | null => {
+    const i = idx(from);
+    const j = idx(to);
+    if (!estimate || i === undefined || j === undefined) return null;
+    return { minutes: (estimate.seconds[i]?.[j] ?? 0) / 60, measured: estimate.measured[i]?.[j] === true };
+  };
   const out: Record<string, RouteView> = {};
   for (const s of staff) {
     const vs = (routes[s.staffId] ?? []).map((id) => visitsById[id]).filter((v): v is EvalVisit => v !== undefined);
     if (vs.length === 0) continue;
     const r = evaluateRoute(s, vs, m);
-    const e = estimate ? evaluateRoute(s, vs, estimate) : null;
-    const lastPoint = vs[vs.length - 1]?.pointId ?? s.homePointId;
-    const back = leg(m, lastPoint, s.homePointId);
-    const backE = estimate ? leg(estimate, lastPoint, s.homePointId) : null;
-    out[s.staffId] = {
-      stops: r.stops.map((x) => ({
+    // 区間は着いた訪問の順にたどる（行けなかった訪問は evaluateRoute と同じく飛ばす）
+    const path = [s.homePointId, ...r.stops.map((x) => visitsById[x.visitId]?.pointId ?? s.homePointId)];
+    let estTotal = 0;
+    const stops = r.stops.map((x, k) => {
+      const e = est(path[k] as string, path[k + 1] as string);
+      estTotal += e?.minutes ?? 0;
+      return {
         visitId: x.visitId,
         start: Math.round(x.start),
         end: Math.round(x.end),
         travelMinutes: r1(x.travelMinutes),
-        estimateMinutes: e ? r1(e.stops.find((y) => y.visitId === x.visitId)?.travelMinutes ?? 0) : null,
+        estimateMinutes: e?.measured ? r1(e.minutes) : null,
         late: x.late,
-      })),
+      };
+    });
+    const last = path[path.length - 1] as string;
+    const back = leg(m, last, s.homePointId);
+    const backE = est(last, s.homePointId);
+    estTotal += backE?.minutes ?? 0;
+    const lastEnd = r.stops[r.stops.length - 1]?.end ?? hhmmToMinutes(s.shiftStart);
+    out[s.staffId] = {
+      stops,
       backMinutes: r1((back?.sec ?? 0) / 60),
-      backEstimateMinutes: backE ? r1(backE.sec / 60) : null,
+      backEstimateMinutes: backE?.measured ? r1(backE.minutes) : null,
       travelMinutes: r1(r.travelSeconds / 60),
-      estimateTravelMinutes: e ? r1(e.travelSeconds / 60) : null,
+      estimateTravelMinutes: estimate ? r1(estTotal) : null,
+      off: s.off === true,
+      overShift: lastEnd + (back?.sec ?? 0) / 60 > hhmmToMinutes(s.shiftEnd) + 0.01,
     };
   }
   return out;
