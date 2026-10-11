@@ -2,6 +2,20 @@
   "projects": {
     "default": "corded-academy-502703-f5"
   },
-  "targets": {},
+  "targets": {
+    "corded-academy-502703-f5": {
+      "hosting": {
+        "demo": [
+          "katahimo-visit-route-demo"
+        ],
+        "prod": [
+          "katahimo-visit-route"
+        ],
+        "legacy": [
+          "corded-academy-502703-f5"
+        ]
+      }
+    }
+  },
   "etags": {}
 }

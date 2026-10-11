@@ -72,10 +72,23 @@ pnpm test:rules    # セキュリティルール（エミュレーター）
    最適化サービスは `invoker="private"`。業務関数のサービスアカウント（既定は `<project-number>-compute@developer.gserviceaccount.com`）に、その Cloud Run サービスの `roles/run.invoker` を付ける。
    比較用の OSRM 仙台版（ADR-0005）：`osrm/deploy.sh <project>` → 出てきた `OSRM_URL` を同じファイルに書く。書かなければ比較値は残さない。
 4. `web/.env.production.local` に Firebase の Web 設定を書き、`pnpm --filter web build`。
-5. `firebase deploy --only firestore,functions:default,hosting`。
+5. `firebase deploy --only firestore,functions:default,hosting:demo`（画面の置き場所は下の「画面のアドレス」）。
 6. 事業所の開設：`GCLOUD_PROJECT=<project> pnpm org:create -- <orgId> <事業所名> <sitter|care|nursing|other> <管理者メール> [--operator <運営者メール>]`。
    スタッフは管理者画面で登録して「招待」すると、本人がアプリを開いてログインコードを受け取れる。
 7. 下の「デモ期間から本番への切り替え」の順に進める。
+
+## 画面のアドレス
+
+Hosting は1つのプロジェクトに複数のサイトを置いている（`.firebaserc` の targets）。
+
+| target | アドレス | 中身 |
+|---|---|---|
+| `demo` | https://katahimo-visit-route-demo.web.app | デモ期間の画面（`VITE_DEMO_LOGIN=true` のビルド） |
+| `prod` | https://katahimo-visit-route.web.app | 本番用に名前だけ確保。本番への切り替えで使い始める |
+| `legacy` | https://corded-academy-502703-f5.web.app | 旧アドレス。`hosting/legacy` がデモのサイトへ転送し、旧アドレスで入れたアプリの Service Worker を外す |
+
+- PWA はアドレスに結びつく（変えると、スタッフはアプリの入れ直しとログインのやり直しになり、未送信の記録は引き継がれない）。本番のアドレスは、協力法人のスタッフがインストールする前に決めて、その後は変えない
+- 本番への切り替えでは、firebase.json の `hosting` に `prod`（`web/dist`、デモの設定を外したビルド）を足して `firebase deploy --only hosting:prod`。デモのサイトは `legacy` と同じ転送にするか、`firebase hosting:disable --site katahimo-visit-route-demo` で止める
 
 ## デモ期間から本番への切り替え（ADR-0007）
 
@@ -83,7 +96,7 @@ pnpm test:rules    # セキュリティルール（エミュレーター）
 
 **デモ期間**（今の設定）
 - `functions/.env.corded-academy-502703-f5` に `DEMO_ORG_ID=demo`。画面は `web/.env.production.local` に `VITE_DEMO_LOGIN=true` を書いてビルド
-- データ：`SEED_PROJECT=corded-academy-502703-f5 pnpm seed`（GOOGLE_APPLICATION_CREDENTIALS か gcloud の ADC で）。スタッフ8人・訪問先20か所。予定は実行日から `SEED_UNTIL`（既定 2026-11-30）まで毎日入る（平日は17件前後、土日はスタッフ3人で8件）。入れ直すと実行日以降の予定・AI案は作り直す（同じ日は同じ予定になる。スタッフの記録がある日と、過去の記録・勤怠はそのまま）
+- データ：`SEED_PROJECT=corded-academy-502703-f5 pnpm seed`（GOOGLE_APPLICATION_CREDENTIALS か gcloud の ADC で。ADC の課金先が別のプロジェクトなら `GOOGLE_CLOUD_QUOTA_PROJECT=corded-academy-502703-f5` も付ける）。スタッフ8人・訪問先20か所。予定は実行日から `SEED_UNTIL`（既定 2026-11-30）まで毎日入る（平日は17件前後、土日はスタッフ3人で8件）。入れ直すと実行日以降の予定・AI案は作り直す（同じ日は同じ予定になる。スタッフの記録がある日と、過去の記録・勤怠はそのまま）
 - ログイン画面の「デモで試す」で、管理者か、選んだスタッフとしてメールなしで入れる（スタッフはきょうの件数つきで並ぶ）。デモの印（`demo: true`）のある事業所にしか入れない
 - この間は招待が止まり、コードのログインは運営者だけになる（誰でも管理者になれるので、他人のアドレスへの送信の踏み台にしない）。地図APIのキーは無くてよい（移動時間は直線距離の概算）
 - 運営者の作業（実証データの CSV 出力など）をデモ期間中にするなら Trigger Email を用意する。用意しなければ、運営者の作業は切り替え後に行う
@@ -91,7 +104,7 @@ pnpm test:rules    # セキュリティルール（エミュレーター）
 **本番への切り替え**（デモの評価と調整が終わってから）
 1. `GCLOUD_PROJECT=corded-academy-502703-f5 pnpm tsx scripts/endDemo.ts` で消す対象を確かめ、`--apply` を付けて実行（デモの事業所と、デモ・@example.com のアカウントを消す）
 2. `functions/.env.corded-academy-502703-f5` から `DEMO_ORG_ID` を消し、`VITE_DEMO_LOGIN` を外して画面をビルド
-3. 上の手順1・2（Trigger Email・TTL・トークン署名の権限、`MAPS_SERVER_KEY`）を用意して `firebase deploy`
+3. 上の手順1・2（Trigger Email・TTL・トークン署名の権限、`MAPS_SERVER_KEY`）を用意して `firebase deploy`。画面は本番のサイトに出す（下の「画面のアドレス」）
 4. `pnpm org:create` で協力法人の事業所を作り、管理者を招待する
 
 ## 移動時間の比較（分析）
