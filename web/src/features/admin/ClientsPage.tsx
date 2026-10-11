@@ -98,7 +98,7 @@ export default function ClientsPage() {
             setForm(blank(clients.length));
           }}
         >
-          {terms.client}を足す
+          {terms.client}を追加
         </button>
       </div>
 
@@ -145,7 +145,7 @@ export default function ClientsPage() {
                       disabled={privateQ.rows === null}
                       onClick={() => edit(c)}
                     >
-                      直す
+                      編集
                     </button>
                   </td>
                 </tr>
@@ -157,7 +157,7 @@ export default function ClientsPage() {
 
       {form && (
         <div className="card stack">
-          <h3>{isNew ? `${terms.client}を足す` : `${terms.client}を直す`}</h3>
+          <h3>{isNew ? `${terms.client}を追加` : `${terms.client}を編集`}</h3>
           <div className="form-grid">
             <label>
               表示名
@@ -214,7 +214,7 @@ export default function ClientsPage() {
                 checked={form.active}
                 onChange={(e) => setForm({ ...form, active: e.target.checked })}
               />
-              使っている（外すと休止）
+              利用中（外すと休止）
             </label>
           </div>
           <div className="stack" style={{ gap: 4 }}>

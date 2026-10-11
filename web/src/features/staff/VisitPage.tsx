@@ -50,7 +50,7 @@ export function VisitPage({ day }: { day: ReturnType<typeof useStaffDay> }) {
   const press = async (type: 'service_start' | 'service_end') => {
     const pos = await currentPosition();
     recordEvent(orgId, { staffId, date: day.date, type, visitId: stop.visit.id, source: 'button', pos });
-    toast(type === 'service_start' ? 'はじめました' : 'おつかれさまでした');
+    toast(type === 'service_start' ? '開始しました' : 'お疲れさまでした');
   };
 
   const openRoute = () => {
@@ -79,32 +79,32 @@ export function VisitPage({ day }: { day: ReturnType<typeof useStaffDay> }) {
         )}
         {stop.visit.note && <div className="sub">{stop.visit.note}</div>}
         <button type="button" className="btn" onClick={openRoute}>
-          🗺 道を見る
+          🗺 経路を見る
         </button>
       </div>
 
       {stop.status === 'done' ? (
         <div className="card">
           <p>
-            おわりました（{timeOf('service_start')}〜{timeOf('service_end')}）
+            終了しました（{timeOf('service_start')}〜{timeOf('service_end')}）
           </p>
           <Link to="/staff">ホームへ</Link>
         </div>
       ) : stop.status === 'in_service' ? (
         <button type="button" className="btn btn-primary btn-big" onClick={() => press('service_end')}>
-          ■ おわる
+          ■ 終了
         </button>
       ) : (
         <button type="button" className="btn btn-primary btn-big" onClick={() => press('service_start')}>
-          ▶ はじめる
+          ▶ 開始
         </button>
       )}
       {!day.onShift && stop.status !== 'done' && (
-        <p className="sub">「お仕事をはじめる」を押すと、到着が自動で記録されます。</p>
+        <p className="sub">「勤務を開始」を押すと、到着が自動で記録されます。</p>
       )}
       <div className="sub">
-        {timeOf('arrive') && `着いた ${timeOf('arrive')}　`}
-        {timeOf('service_start') && `はじめた ${timeOf('service_start')}`}
+        {timeOf('arrive') && `到着 ${timeOf('arrive')}　`}
+        {timeOf('service_start') && `開始 ${timeOf('service_start')}`}
       </div>
     </>
   );

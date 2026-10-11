@@ -67,7 +67,7 @@ async function updateDay(
     if (!snap.exists) throw new HttpsError('not-found', '勤怠の記録がありません');
     const day = snap.data() as AttendanceDay;
     if (day.version !== version) {
-      throw new HttpsError('failed-precondition', 'ほかの人が先に更新しました。読み直してからやり直してください');
+      throw new HttpsError('failed-precondition', '他の人が先に更新しました。再読み込みしてからやり直してください');
     }
     const next = fn(day);
     next.version = day.version + 1;

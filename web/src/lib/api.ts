@@ -18,10 +18,10 @@ export async function call<N extends CallableName>(name: N, data: Req<N>): Promi
 /** 利用者に見せるメッセージ（業務関数は日本語の message を返す） */
 export function messageOf(e: unknown): string {
   if (e instanceof FirebaseError) {
-    if (e.code === 'functions/unavailable' || e.code === 'unavailable') return e.message || '一時的に使えません。時間をおいて再度お試しください';
-    return e.message || 'うまくいきませんでした';
+    if (e.code === 'functions/unavailable' || e.code === 'unavailable') return e.message || '一時的に利用できません。時間をおいて再度お試しください';
+    return e.message || '処理に失敗しました';
   }
-  return 'うまくいきませんでした。電波のよい場所でもう一度お試しください';
+  return '処理に失敗しました。電波の良い場所で再度お試しください';
 }
 
 /** CSV をファイルとして保存する */

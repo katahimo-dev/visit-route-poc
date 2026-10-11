@@ -9,6 +9,14 @@
       ]
     },
     {
+      "collectionGroup": "availability",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "staffId", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "planRuns",
       "queryScope": "COLLECTION",
       "fields": [

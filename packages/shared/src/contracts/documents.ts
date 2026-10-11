@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MAX_SLOTS, slotsError } from '../domain/availability';
 import {
   ATTENDANCE_STATUSES,
   EVENT_SOURCES,
@@ -40,6 +41,8 @@ export const orgSchema = z.object({
   geofenceMeters: z.number().int().min(30).max(500),
   showAiToStaff: z.boolean(),
   fareYenPerKm: z.number().min(0).max(1000),
+  /** 移動時間に Google の地図API（Routes API）を使う。省略は true。false なら直線距離からの概算（管理者が切り替える） */
+  useMapsApi: z.boolean().optional(),
   /** デモ用の架空の事業所（seedDemo だけが付ける）。デモ用ログインはこの印のある事業所にしか入れない */
   demo: z.boolean().optional(),
 });
@@ -166,3 +169,29 @@ export const attendanceDaySchema = z.object({
   approvedBy: z.string().nullable(),
 });
 export type AttendanceDay = z.infer<typeof attendanceDaySchema>;
+
+/** 時間帯（30分単位、HH:mm） */
+export const slotSchema = z.object({
+  start: hhmmSchema.regex(/:[03]0$/, '時間は30分単位で選んでください'),
+  end: hhmmSchema.regex(/:[03]0$/, '時間は30分単位で選んでください'),
+});
+
+/**
+ * orgs/{orgId}/availability/{staffId}_{date}。その日の稼働時間帯の上書き（ADR-0008）。
+ * 文書が無ければ基本の曜日と時間、slots が空ならその日は休み
+ */
+export const availabilitySchema = z
+  .object({
+    staffId: z.string().min(1),
+    date: dateSchema,
+    slots: z.array(slotSchema).max(MAX_SLOTS),
+    /** 本人がアプリで変えた（管理者のカレンダーに印を出す） */
+    byStaff: z.boolean(),
+    updatedBy: z.string(),
+    updatedAt: z.number(),
+  })
+  .superRefine((a, ctx) => {
+    const e = slotsError(a.slots);
+    if (e) ctx.addIssue({ code: 'custom', path: ['slots'], message: e });
+  });
+export type Availability = z.infer<typeof availabilitySchema>;

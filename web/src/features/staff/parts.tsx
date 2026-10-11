@@ -16,9 +16,9 @@ export const timeRange = (stop: StaffStop) =>
 
 export const STATUS_LABEL: Record<StaffStop['status'], string> = {
   todo: '',
-  arrived: '着いた',
+  arrived: '到着',
   in_service: '訪問中',
-  done: 'おわり',
+  done: '終了',
 };
 
 type P = { lat: number | null; lng: number | null } | undefined;

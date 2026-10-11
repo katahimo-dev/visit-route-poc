@@ -1,135 +1,130 @@
-import { type Client, hhmmToMinutes, minutesToHhmm, type Staff, type Visit, weekday } from '@vrp/shared';
+import { type Client, hhmmToMinutes, minutesToHhmm, type Slot, type Staff, type Visit, withinSlots } from '@vrp/shared';
 
-/** 予定画面の手作業案（スタッフ列への割り当てと順番）の組み立て。画面と Firebase に依存しない */
+/**
+ * 予定画面の手作業案（担当ごとの訪問の割当）の組み立て。画面と Firebase に依存しない。
+ * 回る順番は開始時刻の順で、手では並べ替えない（PRD R3）
+ */
 
 export const NONE = '__none';
 export type Cols = Record<string, string[]>;
 export type View = { cols: Cols; unassigned: string[] };
 type V = Visit & { id: string };
 
-/** 保存済み/編集中の並びと、いまある訪問を突き合わせる（消えた訪問を除き、新しい訪問は担当の列か未割当へ） */
+const byStart = (a: Visit, b: Visit) =>
+  a.earliestStart.localeCompare(b.earliestStart) || a.latestStart.localeCompare(b.latestStart);
+
+/** 訪問IDの列を開始時刻の順に並べる */
+export function timeOrder(ids: string[], visitById: Map<string, Visit>): string[] {
+  return [...ids].sort((a, b) => {
+    const x = visitById.get(a);
+    const y = visitById.get(b);
+    return x && y ? byStart(x, y) : 0;
+  });
+}
+
+/** 保存済み/編集中の割当と、いまある訪問を突き合わせる（消えた訪問を除き、新しい訪問は担当の列か未割当へ） */
 export function reconcile(base: Cols, visits: V[], staffIds: string[]): View {
-  const alive = new Set(visits.map((v) => v.id));
+  const byId = new Map(visits.map((v) => [v.id, v]));
   const placed = new Set<string>();
   const unassigned: string[] = [];
   for (const id of base[NONE] ?? []) {
-    if (alive.has(id) && !placed.has(id)) {
+    if (byId.has(id) && !placed.has(id)) {
       unassigned.push(id);
       placed.add(id);
     }
   }
   const cols: Cols = {};
   for (const s of staffIds) {
-    cols[s] = (base[s] ?? []).filter((id) => alive.has(id) && !placed.has(id));
+    cols[s] = (base[s] ?? []).filter((id) => byId.has(id) && !placed.has(id));
     for (const id of cols[s]) placed.add(id);
   }
-  const byId = new Map(visits.map((x) => [x.id, x]));
-  const rest = visits.filter((v) => !placed.has(v.id)).sort(byStart);
-  for (const v of rest) {
+  for (const v of visits) {
+    if (placed.has(v.id)) continue;
     const col = v.staffId ? cols[v.staffId] : undefined;
-    if (col) insertByTime(col, v, byId);
+    if (col) col.push(v.id);
     else unassigned.push(v.id);
   }
-  return { cols, unassigned };
+  for (const s of staffIds) cols[s] = timeOrder(cols[s] ?? [], byId);
+  return { cols, unassigned: timeOrder(unassigned, byId) };
 }
 
-const byStart = (a: Visit, b: Visit) =>
-  a.earliestStart.localeCompare(b.earliestStart) || a.latestStart.localeCompare(b.latestStart);
-
-/** 開始時刻が同じか早い訪問のうち、いちばん後ろのものの次に入れる（手で並べ替えた列の順番は崩さない） */
-function insertByTime(col: string[], v: Visit & { id: string }, byId: Map<string, Visit>): void {
-  const at = col.findLastIndex((id) => {
-    const x = byId.get(id);
-    return x ? byStart(x, v) <= 0 : false;
-  });
-  col.splice(at + 1, 0, v.id);
-}
-
-/** 担当を変える（to は staffId か NONE）。移した先の列では開始時刻の順の位置に入れる */
+/** 担当を変える（to は staffId か NONE）。移した先でも開始時刻の順 */
 export function assign(view: View, id: string, to: string, visitById: Map<string, V>): View {
   const cols: Cols = {};
   for (const [k, ids] of Object.entries(view.cols)) cols[k] = ids.filter((x) => x !== id);
   const unassigned = view.unassigned.filter((x) => x !== id);
-  const v = visitById.get(id);
-  if (to === NONE || !v) {
-    unassigned.push(id);
-  } else {
-    cols[to] = cols[to] ?? [];
-    insertByTime(cols[to], v, visitById);
-  }
+  if (to === NONE || !visitById.has(id)) return { cols, unassigned: timeOrder([...unassigned, id], visitById) };
+  cols[to] = timeOrder([...(cols[to] ?? []), id], visitById);
   return { cols, unassigned };
 }
 
-/** 列の中で1つ上（-1）・下（+1）へ */
-export function shift(view: View, staffId: string, index: number, dir: -1 | 1): View {
-  const ids = [...(view.cols[staffId] ?? [])];
-  const j = index + dir;
-  if (j < 0 || j >= ids.length) return view;
-  [ids[index], ids[j]] = [ids[j] as string, ids[index] as string];
-  return { ...view, cols: { ...view.cols, [staffId]: ids } };
-}
-
-/** 列を開始時刻の順に並べ直す */
-export function sortByTime(view: View, staffId: string, visitById: Map<string, Visit>): View {
-  const ids = [...(view.cols[staffId] ?? [])].sort((a, b) => {
-    const x = visitById.get(a);
-    const y = visitById.get(b);
-    return x && y ? byStart(x, y) : 0;
-  });
-  return { ...view, cols: { ...view.cols, [staffId]: ids } };
-}
-
-export function isTimeOrdered(ids: string[], visitById: Map<string, Visit>): boolean {
-  return ids.every((id, i) => {
-    const prev = i > 0 ? visitById.get(ids[i - 1] as string) : undefined;
-    const cur = visitById.get(id);
-    return !prev || !cur || byStart(prev, cur) <= 0;
-  });
-}
-
-/** 列の中の訪問の目安の時刻（移動時間は入れない）。開始が約束より遅れるなら late */
-export type Slot = { start: string; end: string; late: boolean };
-export function slotsOf(ids: string[], visitById: Map<string, Visit>): Map<string, Slot> {
-  const out = new Map<string, Slot>();
+/**
+ * 列の中の訪問の時刻（移動時間は入れない目安）と、時間の重なり。
+ * 前の訪問が終わるまで次は始められないとして詰め、約束の時刻（幅があれば最も遅い開始）を過ぎる訪問と、
+ * その原因になった前の訪問の両方を「重なり」にする。
+ * slots（その人の稼働時間帯）を渡すと、約束の幅の中で、作業が時間帯の1つに収まる最も早い時刻に寄せる
+ */
+export type Slotted = { start: number; end: number; overlap: boolean };
+export function timesOf(ids: string[], visitById: Map<string, Visit>, slots?: Slot[]): Map<string, Slotted> {
+  const out = new Map<string, Slotted>();
   let free = 0;
+  let prevId: string | null = null;
   for (const id of ids) {
     const v = visitById.get(id);
     if (!v) continue;
-    const start = Math.max(hhmmToMinutes(v.earliestStart), free);
+    const start = fitInSlots(Math.max(hhmmToMinutes(v.earliestStart), free), v, slots);
     const end = start + v.durationMinutes;
-    out.set(id, { start: minutesToHhmm(start), end: minutesToHhmm(end), late: start > hhmmToMinutes(v.latestStart) });
+    const overlap = start > hhmmToMinutes(v.latestStart);
+    out.set(id, { start, end, overlap });
+    const prev = prevId ? out.get(prevId) : undefined;
+    if (overlap && prev) prev.overlap = true;
     free = end;
+    prevId = id;
   }
   return out;
 }
 
-/** 担当の割り当てで気をつけること（画面に出す印。保存は止めない） */
-export type Warning = 'off_day' | 'gender' | 'ng' | 'late';
+/** 約束の幅（最も遅い開始まで）の中で、作業が時間帯の1つに収まる最も早い開始。無ければそのまま */
+function fitInSlots(start: number, v: Visit, slots: Slot[] | undefined): number {
+  if (!slots) return start;
+  const latest = hhmmToMinutes(v.latestStart);
+  for (const s of slots) {
+    const at = Math.max(start, hhmmToMinutes(s.start));
+    if (at <= latest && at + v.durationMinutes <= hhmmToMinutes(s.end)) return at;
+  }
+  return start;
+}
+
+export const hhmm = (minutes: number) => minutesToHhmm(minutes);
+
+/** 担当の割当で気をつけること。赤い枠になるのは overlap と outside（保存は止めない） */
+export type Warning = 'overlap' | 'outside' | 'gender' | 'ng';
 export const WARNING_LABELS: Record<Warning, string> = {
-  off_day: '勤務日ではない',
+  overlap: '時間が重なる',
+  outside: '稼働時間外',
   gender: '性別の希望',
   ng: 'NGの組み合わせ',
-  late: '時間に間に合わない',
 };
+export const isRed = (w: Warning[]) => w.includes('overlap') || w.includes('outside');
 
 export function warningsOf(
-  date: string,
   staff: Staff | undefined,
   staffId: string | null,
+  slots: Slot[],
   client: Client | undefined,
   ngStaffIds: string[],
-  slot: Slot | undefined,
+  time: Slotted | undefined,
 ): Warning[] {
   if (!staff || !staffId) return [];
   const w: Warning[] = [];
-  if (!staff.workDays.includes(weekday(date))) w.push('off_day');
+  if (time?.overlap) w.push('overlap');
+  if (time && !withinSlots(slots, time.start, time.end)) w.push('outside');
   if (client?.requiredGender && staff.gender !== client.requiredGender) w.push('gender');
   if (ngStaffIds.includes(staffId)) w.push('ng');
-  if (slot?.late) w.push('late');
   return w;
 }
 
-/** 訪問の時間の表示（幅があれば「10:30〜11:30に開始」） */
+/** 訪問の時間の表示（幅があれば「10:30〜11:30」に開始） */
 export function windowText(v: Visit): string {
   return v.windowKind === 'window' ? `${v.earliestStart}〜${v.latestStart}` : v.earliestStart;
 }

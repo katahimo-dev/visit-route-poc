@@ -5,7 +5,7 @@ import {
   initializeTestEnvironment,
   type RulesTestEnvironment,
 } from '@firebase/rules-unit-testing';
-import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
+import { deleteDoc, doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 import { afterAll, beforeAll, beforeEach, describe, it } from 'vitest';
 
 let env: RulesTestEnvironment;
@@ -136,5 +136,86 @@ describe('ログインコードとメール', () => {
     await assertFails(setDoc(doc(noClaims(), 'loginCodes/x'), { codeHash: 'x' }));
     await assertFails(getDoc(doc(staffA1(), 'mail/x')));
     await assertFails(setDoc(doc(noClaims(), 'mail/x'), { to: 'a@example.com' }));
+  });
+});
+
+describe('稼働時間帯（ADR-0008）', () => {
+  const jst = (offsetDays: number) =>
+    new Date(Date.now() + 9 * 3600_000 + offsetDays * 86400_000).toISOString().slice(0, 10);
+  const avail = (
+    staffId: string,
+    date: string,
+    byStaff: boolean,
+    uid: string,
+    slots = [{ start: '09:00', end: '12:00' }],
+  ) => ({
+    staffId,
+    date,
+    slots,
+    byStaff,
+    updatedBy: uid,
+    updatedAt: Date.now(),
+  });
+  const path = (staffId: string, date: string) => `orgs/A/availability/${staffId}_${date}`;
+
+  it('スタッフは自分の分を、きょう以降だけ書け・消せる（本人の印つき）', async () => {
+    const today = jst(0);
+    await assertSucceeds(setDoc(doc(staffA1(), path('s1', today)), avail('s1', today, true, 'u-s1')));
+    await assertSucceeds(setDoc(doc(staffA1(), path('s1', jst(3))), avail('s1', jst(3), true, 'u-s1', [])));
+    await assertFails(setDoc(doc(staffA1(), path('s1', jst(-1))), avail('s1', jst(-1), true, 'u-s1')));
+    // 本人の印が無い・他人の分・ID と中身の食い違い
+    await assertFails(setDoc(doc(staffA1(), path('s1', jst(1))), avail('s1', jst(1), false, 'u-s1')));
+    await assertFails(setDoc(doc(staffA1(), path('s2', jst(1))), avail('s2', jst(1), true, 'u-s1')));
+    await assertFails(setDoc(doc(staffA1(), path('s1', jst(2))), avail('s1', jst(1), true, 'u-s1')));
+    await assertSucceeds(deleteDoc(doc(staffA1(), path('s1', today))));
+  });
+  it('時間帯の形を検査する（30分単位・開始＜終了・重なりなし・4つまで）', async () => {
+    const d = jst(1);
+    const bad = [
+      [{ start: '09:15', end: '12:00' }],
+      [{ start: '12:00', end: '09:00' }],
+      [
+        { start: '09:00', end: '12:00' },
+        { start: '11:30', end: '13:00' },
+      ],
+      Array.from({ length: 5 }, (_, i) => ({ start: `1${i}:00`, end: `1${i}:30` })),
+    ];
+    for (const slots of bad)
+      await assertFails(setDoc(doc(adminA(), path('s1', d)), avail('s1', d, false, 'u-admin', slots)));
+    await assertSucceeds(
+      setDoc(
+        doc(adminA(), path('s1', d)),
+        avail('s1', d, false, 'u-admin', [
+          { start: '09:00', end: '12:00' },
+          { start: '14:00', end: '18:00' },
+        ]),
+      ),
+    );
+  });
+  it('管理者は過去も書け、スタッフは自分の分だけ読め、別の事業所・退職者は読み書きできない', async () => {
+    const past = jst(-3);
+    await assertSucceeds(setDoc(doc(adminA(), path('s2', past)), avail('s2', past, false, 'u-admin')));
+    await assertFails(setDoc(doc(adminA(), path('s2', jst(1))), avail('s2', jst(1), true, 'u-admin')));
+    await assertFails(getDoc(doc(staffA1(), path('s2', past))));
+    await assertSucceeds(getDoc(doc(adminA(), path('s2', past))));
+    await assertFails(
+      getDoc(doc(env.authenticatedContext('u-b', { orgId: 'B', role: 'admin' }).firestore(), path('s2', past))),
+    );
+    await assertFails(setDoc(doc(staffA3(), path('s3', jst(1))), avail('s3', jst(1), true, 'u-s3')));
+  });
+});
+
+describe('事業所の設定', () => {
+  it('管理者は地図APIを使うかどうかだけ変えられ、他の設定・別の事業所は変えられない', async () => {
+    await assertSucceeds(updateDoc(doc(adminA(), 'orgs/A'), { useMapsApi: false }));
+    await assertFails(updateDoc(doc(adminA(), 'orgs/A'), { useMapsApi: 'yes' }));
+    await assertFails(updateDoc(doc(adminA(), 'orgs/A'), { useMapsApi: true, name: '乗っ取り' }));
+    await assertFails(updateDoc(doc(adminA(), 'orgs/A'), { demo: true }));
+    await assertFails(updateDoc(doc(staffA1(), 'orgs/A'), { useMapsApi: true }));
+    await assertFails(
+      updateDoc(doc(env.authenticatedContext('u-b', { orgId: 'B', role: 'admin' }).firestore(), 'orgs/A'), {
+        useMapsApi: true,
+      }),
+    );
   });
 });

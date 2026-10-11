@@ -122,7 +122,7 @@ export default function StaffPage() {
             setForm(blank());
           }}
         >
-          {terms.staff}を足す
+          {terms.staff}を追加
         </button>
       </div>
       {error && !form && <p className="error">{error}</p>}
@@ -161,7 +161,7 @@ export default function StaffPage() {
                   </td>
                   <td>
                     <button type="button" className="btn btn-small" onClick={() => edit(s)}>
-                      直す
+                      編集
                     </button>
                   </td>
                 </tr>
@@ -173,7 +173,7 @@ export default function StaffPage() {
 
       {form && (
         <div className="card stack">
-          <h3>{form.id && staff.some((s) => s.id === form.id) ? `${terms.staff}を直す` : `${terms.staff}を足す`}</h3>
+          <h3>{form.id && staff.some((s) => s.id === form.id) ? `${terms.staff}を編集` : `${terms.staff}を追加`}</h3>
           <div className="form-grid">
             <label>
               名前
@@ -210,6 +210,7 @@ export default function StaffPage() {
               勤務開始
               <input
                 type="time"
+                step={1800}
                 value={form.shiftStart}
                 onChange={(e) => setForm({ ...form, shiftStart: e.target.value })}
               />
@@ -218,6 +219,7 @@ export default function StaffPage() {
               勤務終了
               <input
                 type="time"
+                step={1800}
                 value={form.shiftEnd}
                 onChange={(e) => setForm({ ...form, shiftEnd: e.target.value })}
               />
@@ -248,7 +250,7 @@ export default function StaffPage() {
                 checked={form.active}
                 onChange={(e) => setForm({ ...form, active: e.target.checked })}
               />
-              使っている（外すと休止）
+              利用中（外すと休止）
             </label>
           </div>
           <h3>自宅</h3>
@@ -280,7 +282,7 @@ export default function StaffPage() {
       )}
 
       <div className="card stack">
-        <h3>管理者を招待する</h3>
+        <h3>管理者の招待</h3>
         <div className="row" style={{ alignItems: 'flex-end' }}>
           <label style={{ maxWidth: 320 }}>
             メールアドレス

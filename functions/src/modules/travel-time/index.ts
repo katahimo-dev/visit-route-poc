@@ -10,7 +10,7 @@ import {
 } from '@vrp/shared';
 import { onDocumentWritten } from 'firebase-functions/v2/firestore';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
-import { callerOf, col, db, REGION } from '../../lib/context';
+import { callerOf, col, db, orgDoc, REGION } from '../../lib/context';
 import { effective } from '../attendance/domain/buildDay';
 import {
   applyModel,
@@ -38,6 +38,8 @@ export type PredictedMatrix = {
   meters: number[][];
   baseSeconds: number[][];
   modelVersion: string;
+  /** 実際に地図API（Google Routes）の値を使ったか。使うかどうかは事業所の設定 useMapsApi（既定 true） */
+  mapsApi: boolean;
 };
 
 /**
@@ -53,7 +55,10 @@ export async function predictMatrix(
   model?: TravelModel,
 ): Promise<PredictedMatrix> {
   const m = model ?? (await currentModel(orgId));
-  const base = await baseMatrix(orgId, points, mode, departAtMs);
+  const useMaps = (await orgDoc(orgId).get()).get('useMapsApi') !== false;
+  const base = await baseMatrix(orgId, points, mode, departAtMs, useMaps);
+  // 実際に地図APIの値（キャッシュ含む）を使ったか。設定が on でもキーが無ければ概算になる
+  const mapsApi = base.some((row, i) => row.some((l, j) => i !== j && l.source === 'routes_api'));
   const key = factorKey(mode, timeBandOf(hhmmToMinutes(jstHhmm(departAtMs))), dayTypeOf(weekday(date)));
   const usedFallback = base.some((row) => row.some((l) => l.source === 'fallback' && l.seconds > 0));
   return {
@@ -61,6 +66,7 @@ export async function predictMatrix(
     seconds: base.map((row) => row.map((l) => applyModel(l.seconds, m, key))),
     meters: base.map((row) => row.map((l) => l.meters)),
     modelVersion: usedFallback ? `${m.version}+fallback` : m.version,
+    mapsApi,
   };
 }
 
@@ -151,7 +157,7 @@ export const onAttendanceDayWritten = onDocumentWritten(
 /** 実測区間から補正モデルの新しい版を作る（運営者のみ） */
 export const trainModel = onCall({ region: REGION }, async (req) => {
   const c = callerOf(req);
-  if (c.role !== 'operator') throw new HttpsError('permission-denied', 'この操作は運営者だけができます');
+  if (c.role !== 'operator') throw new HttpsError('permission-denied', 'この操作は運営者のみ可能です');
   const orgId =
     typeof (req.data as { orgId?: unknown })?.orgId === 'string' ? (req.data as { orgId: string }).orgId : null;
   if (!orgId) throw new HttpsError('invalid-argument', '事業所を指定してください');

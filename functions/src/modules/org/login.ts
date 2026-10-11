@@ -9,13 +9,14 @@ import {
 } from '@vrp/shared';
 import { getAuth } from 'firebase-admin/auth';
 import { Timestamp } from 'firebase-admin/firestore';
-import { defineString } from 'firebase-functions/params';
+import { defineSecret, defineString } from 'firebase-functions/params';
 import { logger } from 'firebase-functions/v2';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { col, db, orgDoc, parse, REGION } from '../../lib/context';
 import {
   canSend,
+  checkDemoPassword,
   demoStaffOf,
   failed,
   issue,
@@ -36,6 +37,11 @@ import {
 
 /** デモの事業所（設定した環境だけ。本番の事業所には設定しない） */
 export const DEMO_ORG_ID = defineString('DEMO_ORG_ID', { default: '' });
+/**
+ * デモの簡易パスワードのハッシュ（scripts/demoPasswordHash.ts で作り、Secret Manager に置く）。
+ * リポジトリは公開なので、ハッシュも設定ファイルに書かない（弱いパスワードはハッシュから総当たりで戻せる）
+ */
+export const DEMO_PASSWORD_HASH = defineSecret('DEMO_PASSWORD_HASH');
 
 const codes = () => db.collection('loginCodes');
 const isEmulator = process.env.FUNCTIONS_EMULATOR === 'true';
@@ -94,7 +100,7 @@ export const requestLoginCode = onCall({ region: REGION }, async (req) => {
           'アプリの画面に入力してください。10分間有効です。',
           '',
           'このコードは誰にも教えないでください。事業所の人が電話などで聞くことはありません。',
-          'ログインしようとしていない場合は、このメールを捨ててください。',
+          'ログインに心当たりがない場合は、このメールを破棄してください。',
         ].join('\n'),
       },
     });
@@ -120,11 +126,11 @@ export const verifyLoginCode = onCall({ region: REGION }, async (req) => {
     return { r, left: doc ? MAX_ATTEMPTS - doc.attempts - 1 : 0 };
   });
   if (result.r === 'expired')
-    throw new HttpsError('failed-precondition', 'コードの期限が切れました。もう一度コードを送ってください');
+    throw new HttpsError('failed-precondition', 'コードの期限が切れました。再度コードを送信してください');
   if (result.r === 'wrong') {
     throw new HttpsError(
       'invalid-argument',
-      result.left > 0 ? `コードが違います（あと${result.left}回）` : 'コードが違います。もう一度コードを送ってください',
+      result.left > 0 ? `コードが違います（あと${result.left}回）` : 'コードが違います。再度コードを送信してください',
     );
   }
   const uid = (await invitedMember(email))?.uid;
@@ -164,11 +170,16 @@ export const revokeInactiveSessions = onSchedule(
  * デモの事業所の ID。デモの環境でなければ止める。
  * 設定の誤り（実在の事業所の ID を書いた等）で実データに入れないよう、デモの印（seedDemo が付ける）を確かめる
  */
-async function demoOrg(): Promise<string> {
+async function demoOrg(password: string): Promise<string> {
   const orgId = DEMO_ORG_ID.value();
-  if (!orgId) throw new HttpsError('permission-denied', 'デモは使えません');
+  if (!orgId) throw new HttpsError('permission-denied', 'デモは利用できません');
+  // 簡易パスワード。間違えたら少し待たせる（総当たりを遅くする）
+  if (!checkDemoPassword(password, DEMO_PASSWORD_HASH.value())) {
+    await new Promise((r) => setTimeout(r, MIN_RESPONSE_MS));
+    throw new HttpsError('permission-denied', 'パスワードが違います');
+  }
   const org = (await orgDoc(orgId).get()).data() as Org | undefined;
-  if (org?.demo !== true) throw new HttpsError('permission-denied', 'デモは使えません');
+  if (org?.demo !== true) throw new HttpsError('permission-denied', 'デモは利用できません');
   return orgId;
 }
 
@@ -182,9 +193,9 @@ async function demoStaffDocs(orgId: string) {
  * デモ用：ログインする人を選ぶための、デモの事業所のスタッフ（未ログインで呼べる）。
  * 返すのは seed が作った架空の人物の名前と、その日の訪問件数だけ（ADR-0007）
  */
-export const demoStaffList = onCall({ region: REGION }, async (req) => {
-  const orgId = await demoOrg();
-  const { date } = parse(demoStaffListRequest, req.data);
+export const demoStaffList = onCall({ region: REGION, secrets: [DEMO_PASSWORD_HASH] }, async (req) => {
+  const { password, date } = parse(demoStaffListRequest, req.data);
+  const orgId = await demoOrg(password);
   const [staffDocs, visitsSnap] = await Promise.all([
     demoStaffDocs(orgId),
     col(orgId, 'visits').where('date', '==', date).get(),
@@ -202,9 +213,9 @@ export const demoStaffList = onCall({ region: REGION }, async (req) => {
  * デモ用のログイン。メール不要で、デモの事業所の管理者か、選んだスタッフ（無指定なら最初の人）としてログインする。
  * 画面説明・お試し用。入れるのはデモの印（demo: true）のある架空の事業所だけで、実データの事業所には入れない（ADR-0007）。
  */
-export const demoSignIn = onCall({ region: REGION }, async (req) => {
-  const orgId = await demoOrg();
-  const { as, staffId } = parse(demoSignInRequest, req.data);
+export const demoSignIn = onCall({ region: REGION, secrets: [DEMO_PASSWORD_HASH] }, async (req) => {
+  const { password, as, staffId } = parse(demoSignInRequest, req.data);
+  const orgId = await demoOrg(password);
   const auth = getAuth();
   const ensure = async (uid: string, claims: Record<string, string>) => {
     await auth.getUser(uid).catch(() => auth.createUser({ uid, displayName: 'デモ' }));

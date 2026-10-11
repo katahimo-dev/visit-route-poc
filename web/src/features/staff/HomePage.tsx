@@ -19,7 +19,7 @@ export function HomePage({ day }: { day: ReturnType<typeof useStaffDay> }) {
 
   const shift = async (type: 'shift_start' | 'shift_end') => {
     if (!s.orgId || !s.staffId) return;
-    if (type === 'shift_end' && !confirm('きょうのお仕事をおわりますか？（位置の記録を止めます）')) return;
+    if (type === 'shift_end' && !confirm('今日の勤務を終了しますか？（位置の記録を止めます）')) return;
     const pos = await currentPosition();
     recordEvent(s.orgId, { staffId: s.staffId, date: jstDate(Date.now()), type, visitId: null, source: 'button', pos });
   };
@@ -28,7 +28,7 @@ export function HomePage({ day }: { day: ReturnType<typeof useStaffDay> }) {
     <>
       <div className="spread">
         <div>
-          <div className="sub">おつかれさまです</div>
+          <div className="sub">お疲れさまです</div>
           <h2>{day.me?.name ?? ''}さん</h2>
         </div>
         <button type="button" className="btn btn-small" onClick={() => logout()}>
@@ -39,17 +39,17 @@ export function HomePage({ day }: { day: ReturnType<typeof useStaffDay> }) {
       {day.onShift ? (
         <div className="spread">
           {tracker.tracking ? (
-            <span className="tracking">位置を記録しています（お仕事中だけ）</span>
+            <span className="tracking">位置を記録しています（勤務中のみ）</span>
           ) : (
             <span className="sub">位置を確認しています…</span>
           )}
           <button type="button" className="btn btn-small" onClick={() => shift('shift_end')}>
-            お仕事おわり
+            勤務を終了
           </button>
         </div>
       ) : (
         <button type="button" className="btn btn-primary btn-big" onClick={() => shift('shift_start')}>
-          お仕事をはじめる
+          勤務を開始
         </button>
       )}
       {tracker.error && <p className="error">{tracker.error}</p>}
@@ -57,7 +57,7 @@ export function HomePage({ day }: { day: ReturnType<typeof useStaffDay> }) {
       {next ? (
         <div className="card stack">
           <span className="chip chip-primary" style={{ alignSelf: 'flex-start' }}>
-            つぎの訪問 {STATUS_LABEL[next.status]}
+            次の訪問 {STATUS_LABEL[next.status]}
           </span>
           <div className="row">
             <ClientDot stop={next} />
@@ -66,7 +66,7 @@ export function HomePage({ day }: { day: ReturnType<typeof useStaffDay> }) {
           <div style={{ fontSize: '1.6rem', fontWeight: 700 }}>🕙 {timeRange(next)}</div>
           {mins !== null && (
             <div className="sub">
-              {MODE_ICON[mode]} {idx > 0 ? '前の訪問から' : 'おうちから'} 約{mins}分
+              {MODE_ICON[mode]} {idx > 0 ? '前の訪問から' : '自宅から'} 約{mins}分
             </div>
           )}
           <Link
@@ -74,12 +74,12 @@ export function HomePage({ day }: { day: ReturnType<typeof useStaffDay> }) {
             className="btn btn-primary btn-big"
             style={{ textAlign: 'center', textDecoration: 'none' }}
           >
-            ひらく
+            開く
           </Link>
         </div>
       ) : (
         <div className="card">
-          <p>{day.stops.length ? 'きょうの訪問はすべておわりました' : 'きょうの訪問はありません'}</p>
+          <p>{day.stops.length ? '今日の訪問はすべて終わりました' : '今日の訪問はありません'}</p>
         </div>
       )}
 

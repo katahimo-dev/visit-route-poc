@@ -25,6 +25,10 @@ export type EvalStaff = {
   homePointId: string;
   shiftStart: string;
   shiftEnd: string;
+  /** 勤務時間の中の休み（ADR-0008）。作業は休み明けまで待って始める */
+  breaks?: { start: string; end: string }[];
+  /** その日は休み（稼働時間帯なし）なのに手作業案で担当がある。訪問1件ごとに条件違反 */
+  off?: boolean;
 };
 
 export type StopTiming = {
@@ -42,7 +46,7 @@ export type RouteMetrics = {
   travelSeconds: number;
   meters: number;
   waitSeconds: number;
-  /** 時間の約束に遅れる・勤務時間を超える・到達不能の件数 */
+  /** 時間の約束に遅れる・勤務時間を超える・休みの日の担当・到達不能の件数 */
   violations: number;
   stops: StopTiming[];
 };
@@ -54,6 +58,28 @@ function leg(m: EvalMatrix, from: string, to: string): { sec: number; meters: nu
   const sec = m.seconds[i]?.[j];
   if (sec === undefined || sec < 0) return null;
   return { sec, meters: m.meters[i]?.[j] ?? 0 };
+}
+
+/**
+ * 作業 [start, start+dur) が休みにかかるなら、休み明けまで開始を遅らせる（最適化サービスの avoid_breaks と同じ規則）。
+ * 戻り値は開始と、そのうち休みで待った分
+ */
+function avoidBreaks(
+  start: number,
+  dur: number,
+  breaks: { start: string; end: string }[],
+): { start: number; rest: number } {
+  let s = start;
+  let rest = 0;
+  for (const b of breaks) {
+    const bs = hhmmToMinutes(b.start);
+    const be = hhmmToMinutes(b.end);
+    if (s < be && bs < s + dur) {
+      rest += be - Math.max(s, bs);
+      s = be;
+    }
+  }
+  return { start: s, rest };
 }
 
 export function evaluateRoute(staff: EvalStaff, visits: EvalVisit[], m: EvalMatrix): RouteMetrics {
@@ -78,10 +104,13 @@ export function evaluateRoute(staff: EvalStaff, visits: EvalVisit[], m: EvalMatr
     if (first) t = Math.max(t, earliest - travelMinutes);
     first = false;
     const arrival = t + travelMinutes;
-    const start = Math.max(arrival, earliest);
-    const wait = start - arrival;
+    const shifted = avoidBreaks(Math.max(arrival, earliest), v.durationMinutes, staff.breaks ?? []);
+    const start = shifted.start;
+    // 休みの時間は待ちに数えない
+    const wait = start - arrival - shifted.rest;
     const late = start > latest + 0.01;
     if (late) violations++;
+    if (staff.off) violations++;
     const end = start + v.durationMinutes;
     stops.push({ visitId: v.visitId, arrival, start, end, waitMinutes: wait, travelMinutes, late });
     travelSeconds += l.sec;

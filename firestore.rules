@@ -22,11 +22,35 @@ service cloud.firestore {
 
     function isDate(v) { return v is string && v.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$'); }
     function isNullableNumber(v) { return v == null || v is number; }
+    // 日本時間のきょう以降の日付か
+    function notPastJst(d) {
+      return isDate(d)
+        && timestamp.date(int(d[0:4]), int(d[5:7]), int(d[8:10])) >= (request.time + duration.value(9, 'h')).date();
+    }
+    // 稼働時間帯：30分単位の HH:mm、開始＜終了、開始の順で重なりなし、4つまで（zod の availabilitySchema と同じ）
+    function isHalfHour(v) { return v is string && v.matches('^([01][0-9]|2[0-3]):[03]0$'); }
+    function isSlot(s) {
+      return s is map && s.keys().hasOnly(['start', 'end']) && isHalfHour(s.get('start', null))
+        && isHalfHour(s.get('end', null)) && s.start < s.end;
+    }
+    function slotOk(slots, i) {
+      return slots.size() <= i || (isSlot(slots[i]) && (slots.size() <= i + 1 || slots[i].end <= slots[i + 1].start));
+    }
+    function isAvailability(id, d, byStaff) {
+      return d.keys().hasOnly(['staffId', 'date', 'slots', 'byStaff', 'updatedBy', 'updatedAt'])
+        && d.staffId is string && isDate(d.date) && id == d.staffId + '_' + d.date
+        && d.slots is list && d.slots.size() <= 4
+        && slotOk(d.slots, 0) && slotOk(d.slots, 1) && slotOk(d.slots, 2) && slotOk(d.slots, 3)
+        && d.byStaff == byStaff && d.updatedBy == request.auth.uid && d.updatedAt is number;
+    }
 
     match /orgs/{orgId} {
       allow read: if canRead(orgId);
-      // 事業所の設定は運営者だけ（開設はスクリプト）
+      // 事業所の設定は運営者だけ（開設はスクリプト）。管理者は地図APIを使うかどうかだけ切り替えられる
       allow write: if isOperator();
+      allow update: if isAdmin(orgId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['useMapsApi'])
+        && request.resource.data.useMapsApi is bool;
 
       // マスタ・予定・手作業案：管理者が編集、事業所のメンバーが読む
       // 同僚の自宅・メールは見せない。スタッフが読めるのは自分の文書だけ
@@ -68,6 +92,19 @@ service cloud.firestore {
       match /manualPlans/{date} {
         allow read: if canRead(orgId);
         allow write: if canManage(orgId) && request.resource.data.date == date && request.resource.data.routes is map;
+      }
+
+      // 稼働時間帯の上書き（ADR-0008）。管理者は全員・全日、スタッフは自分の分だけ・日本時間のきょう以降
+      match /availability/{id} {
+        allow read: if canManage(orgId) || (isActiveStaff(orgId) && resource.data.staffId == myStaffId());
+        allow create, update: if (canManage(orgId) && isAvailability(id, request.resource.data, false))
+          || (isActiveStaff(orgId)
+            && request.resource.data.staffId == myStaffId()
+            && (resource == null || resource.data.staffId == myStaffId())
+            && notPastJst(request.resource.data.date)
+            && isAvailability(id, request.resource.data, true));
+        allow delete: if canManage(orgId)
+          || (isActiveStaff(orgId) && resource.data.staffId == myStaffId() && notPastJst(resource.data.date));
       }
 
       // スタッフの記録：本人だけが作成。更新・削除はできない（再送は同じ文書の作成＝冪等）

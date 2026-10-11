@@ -1,15 +1,18 @@
 import {
+  type Availability,
+  availabilityOf,
   type Client,
   type ClientPrivate,
   type ManualPlan,
   manualPlanSchema,
   type Staff,
+  slotsText,
   type Visit,
   visitSchema,
   weekday,
 } from '@vrp/shared';
 import { collection, doc, getDoc, getDocs, query, updateDoc, where, writeBatch } from 'firebase/firestore';
-import { useEffect, useMemo, useState } from 'react';
+import { type DragEvent, useEffect, useMemo, useState } from 'react';
 import { type MapLine, type MapPoint, RouteMap } from '../../../components/RouteMap';
 import { useToast } from '../../../components/Toast';
 import { colorOf, initialOf } from '../../../lib/colors';
@@ -20,23 +23,25 @@ import { addDays, DateField, formError, hasLocation, staffColor, tomorrow, useAd
 import {
   assign,
   type Cols,
-  isTimeOrdered,
+  hhmm,
+  isRed,
   NONE,
   reconcile,
-  type Slot,
-  shift,
-  slotsOf,
-  sortByTime,
+  type Slotted,
+  timeOrder,
+  timesOf,
   type View,
   WARNING_LABELS,
+  type Warning,
   warningsOf,
   windowText,
 } from './model';
 import { VisitForm } from './VisitForm';
 
 /**
- * 予定＝その日の訪問と手作業案。
- * 上の一覧で訪問ごとに担当を選び、下の担当ごとの列で回る順番を決める（どちらも保存するまでは下書き）
+ * 予定＝その日の訪問と手作業案（担当の割当）。
+ * 上の一覧で担当を選ぶか、下の担当ごとの列のあいだで訪問をドラッグして移す（保存するまでは下書き）。
+ * 回る順番は開始時刻の順（PRD R3）。時間の重なり・稼働時間外は赤い枠で知らせ、保存は止めない
  */
 export default function SchedulePage() {
   const { orgId, terms } = useAdmin();
@@ -48,6 +53,7 @@ export default function SchedulePage() {
   const clientsQ = useOrgCollection<Client>(orgId, 'clients');
   const privateQ = useOrgCollection<ClientPrivate>(orgId, 'clientPrivate');
   const planDoc = useOrgDoc<ManualPlan>(orgId, 'manualPlans', date);
+  const availQ = useOrgCollection<Availability>(orgId, 'availability', [where('date', '==', date)], date);
   const [draft, setDraft] = useState<Cols | null>(null);
   const [minutes, setMinutes] = useState<string | null>(null);
   /** 開いている入力欄（null：閉じている、'new'：足す、それ以外：直す訪問の ID） */
@@ -95,21 +101,86 @@ export default function SchedulePage() {
     for (const [s, ids] of Object.entries(view.cols)) for (const id of ids) m.set(id, s);
     return m;
   }, [view]);
-  const slots = useMemo(() => {
-    const m = new Map<string, Slot>();
-    for (const ids of Object.values(view.cols)) for (const [id, s] of slotsOf(ids, visitById)) m.set(id, s);
-    return m;
-  }, [view, visitById]);
 
   const dow = weekday(date);
-  const worksToday = (s: Staff) => s.active && s.workDays.includes(dow);
-  /** 担当に選べる人：勤務日の人を先に、休みの人は後ろ（休止中の人は、すでに担当している訪問があるときだけ） */
+  /** その日の稼働時間帯（基本の曜日と時間＋日ごとの上書き。ADR-0008） */
+  const slotsOf = useMemo(() => {
+    const overrides = new Map((availQ.rows ?? []).map((a) => [a.staffId, a]));
+    return new Map(staff.map((s) => [s.id, availabilityOf(s, date, overrides.get(s.id))]));
+  }, [staff, availQ.rows, date]);
+  const times = useMemo(() => {
+    const m = new Map<string, Slotted>();
+    for (const [sid, ids] of Object.entries(view.cols))
+      for (const [id, t] of timesOf(ids, visitById, slotsOf.get(sid)?.slots)) m.set(id, t);
+    return m;
+  }, [view, visitById, slotsOf]);
+  const worksToday = (s: WithId<Staff>) => s.active && (slotsOf.get(s.id)?.slots.length ?? 0) > 0;
+  /** 担当に選べる人：その日に働ける人を先に、休みの人は後ろ（休止中の人は、すでに担当している訪問があるときだけ） */
   const choosable = [...staff.filter(worksToday), ...staff.filter((s) => s.active && !worksToday(s))];
-  /** 列を出す人：勤務日の人と、担当の訪問がある人 */
-  const columns = staff.filter((s) => worksToday(s) || (view.cols[s.id]?.length ?? 0) > 0);
-  const sortedVisits = [...visits].sort(
-    (a, b) => a.earliestStart.localeCompare(b.earliestStart) || a.latestStart.localeCompare(b.latestStart),
-  );
+  /** 列を出す人：在籍中の全員（働ける人が先）と、担当の訪問がある休止中の人 */
+  const columns = [...choosable, ...staff.filter((s) => !s.active && (view.cols[s.id]?.length ?? 0) > 0)];
+  const sortedVisits = useMemo(() => timeOrder([...visitById.keys()], visitById), [visitById]);
+  const warningsFor = (id: string): Warning[] => {
+    const v = visitById.get(id);
+    const owner = ownerOf.get(id) ?? null;
+    if (!v || !owner) return [];
+    return warningsOf(
+      staffById.get(owner),
+      owner,
+      slotsOf.get(owner)?.slots ?? [],
+      clientById.get(v.clientId),
+      ngById.get(v.clientId) ?? [],
+      times.get(id),
+    );
+  };
+
+  // ドラッグ：訪問を別の担当の列（か未割当）へ移す。移すと時間が重なる・稼働時間外になる列は、ドラッグ中から赤くする
+  const [dragging, setDragging] = useState<string | null>(null);
+  const [dropTo, setDropTo] = useState<string | null>(null);
+  const dropWarning = (to: string): Warning[] => {
+    if (!dragging || to === NONE || ownerOf.get(dragging) === to) return [];
+    const next = assign(view, dragging, to, visitById);
+    const t = timesOf(next.cols[to] ?? [], visitById, slotsOf.get(to)?.slots).get(dragging);
+    const v = visitById.get(dragging);
+    return warningsOf(
+      staffById.get(to),
+      to,
+      slotsOf.get(to)?.slots ?? [],
+      v && clientById.get(v.clientId),
+      v ? (ngById.get(v.clientId) ?? []) : [],
+      t,
+    );
+  };
+  const dropProps = (to: string) => ({
+    onDragOver: (e: DragEvent) => {
+      if (!dragging) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      if (dropTo !== to) setDropTo(to);
+    },
+    onDragLeave: (e: DragEvent) => {
+      if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropTo(null);
+    },
+    onDrop: (e: DragEvent) => {
+      e.preventDefault();
+      const id = e.dataTransfer.getData('text/plain') || dragging;
+      setDragging(null);
+      setDropTo(null);
+      if (id && visitById.has(id) && (ownerOf.get(id) ?? NONE) !== to) setView(assign(view, id, to, visitById));
+    },
+  });
+  const dragProps = (id: string) => ({
+    draggable: true,
+    onDragStart: (e: DragEvent) => {
+      e.dataTransfer.setData('text/plain', id);
+      e.dataTransfer.effectAllowed = 'move';
+      setDragging(id);
+    },
+    onDragEnd: () => {
+      setDragging(null);
+      setDropTo(null);
+    },
+  });
 
   const minutesValue = minutes ?? (plan?.minutesSpent != null ? String(plan.minutesSpent) : '');
   const dirty = draft !== null || minutes !== null;
@@ -257,7 +328,7 @@ export default function SchedulePage() {
             （{WEEKDAY_LABELS[dow]}）
           </span>
           <button type="button" className="btn" onClick={() => setEditing('new')} disabled={clients.length === 0}>
-            訪問を足す
+            訪問を追加
           </button>
           <button
             type="button"
@@ -293,7 +364,9 @@ export default function SchedulePage() {
               </h3>
               {dirty && <span className="chip chip-warn">未保存の変更があります</span>}
             </div>
-            <p className="sub">訪問ごとに担当の{terms.staff}を選ぶと、下の「回る順番」に入ります。</p>
+            <p className="sub">
+              訪問ごとに担当の{terms.staff}を選ぶと、下の「{terms.staff}ごとの予定」に入ります。
+            </p>
             <div className="table-scroll">
               <table className="visit-table">
                 <thead>
@@ -302,23 +375,18 @@ export default function SchedulePage() {
                     <th>{terms.client}</th>
                     <th className="num">所要</th>
                     <th>担当</th>
-                    <th>気をつけること</th>
+                    <th>注意</th>
                     <th />
                   </tr>
                 </thead>
                 <tbody>
-                  {sortedVisits.map((v) => {
-                    const owner = ownerOf.get(v.id) ?? null;
-                    const warnings = warningsOf(
-                      date,
-                      owner ? staffById.get(owner) : undefined,
-                      owner,
-                      clientById.get(v.clientId),
-                      ngById.get(v.clientId) ?? [],
-                      slots.get(v.id),
-                    );
+                  {sortedVisits.map((id) => {
+                    const v = visitById.get(id);
+                    if (!v) return null;
+                    const owner = ownerOf.get(id) ?? null;
+                    const warnings = warningsFor(id);
                     return (
-                      <tr key={v.id} className={owner ? '' : 'row-unassigned'}>
+                      <tr key={id} className={owner ? '' : 'row-unassigned'}>
                         <td className="nowrap">
                           {windowText(v)}
                           {v.windowKind === 'window' && <div className="sub">に開始</div>}
@@ -330,10 +398,10 @@ export default function SchedulePage() {
                         <td className="num nowrap">{v.durationMinutes}分</td>
                         <td>
                           <select
-                            className="staff-select"
+                            className={`staff-select ${isRed(warnings) ? 'is-red' : ''}`}
                             value={owner ?? NONE}
                             style={{ borderLeftColor: owner ? colorOfStaff.get(owner) : 'var(--warn)' }}
-                            onChange={(e) => setView(assign(view, v.id, e.target.value, visitById))}
+                            onChange={(e) => setView(assign(view, id, e.target.value, visitById))}
                             aria-label="担当"
                           >
                             <option value={NONE}>未割当</option>
@@ -349,17 +417,11 @@ export default function SchedulePage() {
                           </select>
                         </td>
                         <td>
-                          <div className="row" style={{ flexWrap: 'wrap', gap: 4 }}>
-                            {warnings.map((w) => (
-                              <span key={w} className="chip chip-warn">
-                                {WARNING_LABELS[w]}
-                              </span>
-                            ))}
-                          </div>
+                          <WarningChips warnings={warnings} />
                         </td>
                         <td className="nowrap">
-                          <button type="button" className="btn btn-small" onClick={() => setEditing(v.id)}>
-                            直す
+                          <button type="button" className="btn btn-small" onClick={() => setEditing(id)}>
+                            編集
                           </button>{' '}
                           <button type="button" className="btn btn-small" onClick={() => cancelVisit(v)}>
                             取り消す
@@ -374,69 +436,80 @@ export default function SchedulePage() {
           </div>
 
           <div className="card stack">
-            <h3>回る順番（{terms.staff}ごと）</h3>
-            <p className="sub">▲▼で順番を入れ替えます。時刻は移動時間を入れない目安です。</p>
+            <h3>{terms.staff}ごとの予定</h3>
+            <p className="sub">
+              訪問をドラッグして別の{terms.staff}へ移せます。順番は開始時刻の順です（時刻は移動時間を入れない目安）。
+              時間が重なる・稼働時間外になると赤い枠で知らせます。
+            </p>
             <div className="route-grid">
+              <div className={`route-col route-col-none ${dropTo === NONE ? 'is-drop' : ''}`} {...dropProps(NONE)}>
+                <div className="spread">
+                  <strong>未割当</strong>
+                  <span className="sub nowrap">{view.unassigned.length}件</span>
+                </div>
+                {view.unassigned.length === 0 && <span className="sub">ここへドラッグすると未割当に戻せます</span>}
+                {view.unassigned.map((id) => {
+                  const v = visitById.get(id);
+                  if (!v) return null;
+                  return (
+                    <div key={id} className={`route-item ${dragging === id ? 'is-dragging' : ''}`} {...dragProps(id)}>
+                      <div className="sub nowrap">
+                        {windowText(v)}（{v.durationMinutes}分）
+                      </div>
+                      {clientCell(v)}
+                    </div>
+                  );
+                })}
+              </div>
               {columns.map((s) => {
                 const ids = view.cols[s.id] ?? [];
-                const first = slots.get(ids[0] ?? '');
-                const last = slots.get(ids[ids.length - 1] ?? '');
+                const avail = slotsOf.get(s.id);
+                const preview = dropTo === s.id ? dropWarning(s.id) : [];
                 return (
-                  <div key={s.id} className="route-col" style={{ borderTopColor: colorOfStaff.get(s.id) }}>
+                  <div
+                    key={s.id}
+                    className={[
+                      'route-col',
+                      worksToday(s) ? '' : 'is-off',
+                      dropTo === s.id ? 'is-drop' : '',
+                      isRed(preview) ? 'is-red' : '',
+                    ].join(' ')}
+                    style={{ borderTopColor: colorOfStaff.get(s.id) }}
+                    {...dropProps(s.id)}
+                  >
                     <div className="spread">
                       <strong className="ellipsis">{s.name}</strong>
-                      <span className="sub nowrap">
-                        {ids.length}件{first && last ? `・${first.start}〜${last.end}` : ''}
-                      </span>
+                      <span className="sub nowrap">{ids.length}件</span>
                     </div>
-                    {!worksToday(s) && <span className="chip chip-warn">{s.active ? '勤務日ではない' : '休止中'}</span>}
-                    {ids.length === 0 && <span className="sub">訪問なし</span>}
-                    {ids.map((id, idx) => {
+                    <span className={`sub ${worksToday(s) ? '' : 'warn-text'}`}>
+                      {s.active ? slotsText(avail?.slots ?? []) : '休止中'}
+                      {avail?.overridden && '（この日だけ変更）'}
+                    </span>
+                    {preview.length > 0 && (
+                      <div className="drop-warning">
+                        ここに移すと：
+                        <WarningChips warnings={preview} />
+                      </div>
+                    )}
+                    {ids.map((id) => {
                       const v = visitById.get(id);
-                      const slot = slots.get(id);
+                      const t = times.get(id);
                       if (!v) return null;
+                      const warnings = warningsFor(id);
                       return (
-                        <div key={id} className="route-item">
-                          <span className="sub">{idx + 1}</span>
-                          <div style={{ minWidth: 0 }}>
-                            <div className={`sub nowrap ${slot?.late ? 'warn-text' : ''}`}>
-                              {slot ? `${slot.start}〜${slot.end}` : v.earliestStart}
-                              {slot?.late && '（遅れ）'}
-                            </div>
-                            {clientCell(v)}
+                        <div
+                          key={id}
+                          className={`route-item ${isRed(warnings) ? 'is-red' : ''} ${dragging === id ? 'is-dragging' : ''}`}
+                          {...dragProps(id)}
+                        >
+                          <div className={`sub nowrap ${isRed(warnings) ? 'red-text' : ''}`}>
+                            {t ? `${hhmm(t.start)}〜${hhmm(t.end)}` : v.earliestStart}
                           </div>
-                          <div className="route-move">
-                            <button
-                              type="button"
-                              className="btn btn-icon"
-                              disabled={idx === 0}
-                              onClick={() => setView(shift(view, s.id, idx, -1))}
-                              aria-label="上へ"
-                            >
-                              ▲
-                            </button>
-                            <button
-                              type="button"
-                              className="btn btn-icon"
-                              disabled={idx === ids.length - 1}
-                              onClick={() => setView(shift(view, s.id, idx, 1))}
-                              aria-label="下へ"
-                            >
-                              ▼
-                            </button>
-                          </div>
+                          {clientCell(v)}
+                          {warnings.length > 0 && <WarningChips warnings={warnings} />}
                         </div>
                       );
                     })}
-                    {!isTimeOrdered(ids, visitById) && (
-                      <button
-                        type="button"
-                        className="btn btn-small"
-                        onClick={() => setView(sortByTime(view, s.id, visitById))}
-                      >
-                        時刻の順に並べ直す
-                      </button>
-                    )}
                   </div>
                 );
               })}
@@ -475,7 +548,7 @@ export default function SchedulePage() {
             <span className="grow sub">保存すると、各訪問の担当もこのとおりに変わります。</span>
             {dirty && (
               <button type="button" className="btn" onClick={discard}>
-                変更をもどす
+                変更を戻す
               </button>
             )}
             <button type="button" className="btn btn-primary" disabled={busy || !dirty} onClick={savePlan}>
@@ -484,6 +557,18 @@ export default function SchedulePage() {
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+function WarningChips({ warnings }: { warnings: Warning[] }) {
+  return (
+    <div className="row" style={{ flexWrap: 'wrap', gap: 4 }}>
+      {warnings.map((w) => (
+        <span key={w} className={`chip ${w === 'overlap' || w === 'outside' ? 'chip-red' : 'chip-warn'}`}>
+          {WARNING_LABELS[w]}
+        </span>
+      ))}
     </div>
   );
 }

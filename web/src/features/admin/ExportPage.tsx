@@ -35,14 +35,14 @@ export default function ExportPage() {
       <h2>実証データ</h2>
       <div className="card stack">
         <div className="row" style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
-          <DateField label="はじめ" value={from} onChange={setFrom} />
-          <DateField label="おわり" value={to} onChange={setTo} />
+          <DateField label="開始日" value={from} onChange={setFrom} />
+          <DateField label="終了日" value={to} onChange={setTo} />
           <label style={{ maxWidth: 260 }}>
             事業所ID（空なら自分の事業所）
             <input value={orgInput} onChange={(e) => setOrgInput(e.target.value)} placeholder={orgId} />
           </label>
           <button type="button" className="btn btn-primary" disabled={busy} onClick={run}>
-            {busy ? '書き出しています…' : 'CSVを保存'}
+            {busy ? '書き出し中…' : 'CSVを保存'}
           </button>
         </div>
         {error && <p className="error">{error}</p>}
@@ -56,7 +56,7 @@ export default function ExportPage() {
         )}
       </div>
       <div className="card stack">
-        <h3>事業所の設定（見るだけ）</h3>
+        <h3>事業所の設定（閲覧のみ）</h3>
         {org ? (
           <table>
             <tbody>

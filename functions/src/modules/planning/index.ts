@@ -1,4 +1,5 @@
 import {
+  type Availability,
   type Client,
   type ClientPrivate,
   createPlanRunRequest,
@@ -9,7 +10,6 @@ import {
   type Org,
   type Staff,
   type TravelMode,
-  weekday,
 } from '@vrp/shared';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import { callerOf, col, orgDoc, parse, REGION, requireManager } from '../../lib/context';
@@ -34,7 +34,7 @@ async function acquireRun(orgId: string, runId: string, uid: string): Promise<bo
     .count()
     .get();
   if (recent.data().count >= RUNS_PER_HOUR)
-    throw new HttpsError('resource-exhausted', 'AI案を作る回数が多すぎます。1時間ほどおいてから作ってください');
+    throw new HttpsError('resource-exhausted', 'AI案の作成回数が多すぎます。1時間ほど待ってから作成してください');
   try {
     await locks.doc(runId).create({ createdAt: Date.now(), createdBy: uid });
     return true;
@@ -91,13 +91,14 @@ async function run(
   requestId: string,
   uid: string,
 ): Promise<void> {
-  const [orgSnap, staffSnap, clientSnap, privateSnap, visits, manual] = await Promise.all([
+  const [orgSnap, staffSnap, clientSnap, privateSnap, visits, manual, availSnap] = await Promise.all([
     orgDoc(orgId).get(),
     col(orgId, 'staff').get(),
     col(orgId, 'clients').get(),
     col(orgId, 'clientPrivate').get(),
     visitsOfDate(orgId, date),
     manualPlanOf(orgId, date),
+    col(orgId, 'availability').where('date', '==', date).get(),
   ]);
   if (!orgSnap.exists) throw new HttpsError('not-found', '事業所がありません');
   if (visits.length === 0) throw new HttpsError('failed-precondition', 'この日の訪問がありません');
@@ -108,10 +109,13 @@ async function run(
     clientSnap.docs.map((d) => [d.id, { ngStaffIds: [], ...(d.data() as Client), ...privates.get(d.id) }]),
   );
   const manualRoutes = routesOf(visits, manual);
+  const availability = new Map(
+    availSnap.docs.map((d) => [(d.data() as Availability).staffId, d.data() as Availability]),
+  );
 
-  const prepared = prepare({ org, staff, clients, visits, manualRoutes, weekday: weekday(date) }, date);
+  const prepared = prepare({ org, staff, clients, visits, manualRoutes, availability }, date);
   if (prepared.staffIn.length === 0)
-    throw new HttpsError('failed-precondition', '対象のスタッフがいません（自宅の位置・勤務曜日を確認してください）');
+    throw new HttpsError('failed-precondition', '対象のスタッフがいません（自宅の位置・稼働時間帯を確認してください）');
   const firstStart = Math.min(...visits.map((v) => hhmmToMinutes(v.earliestStart)));
   const departAt = jstToMs(date, minutesToHhmm(Math.max(0, firstStart - 30)));
   const mode = majorityMode(staff.filter((s) => prepared.staffIn.some((x) => x.staffId === s.id)));
@@ -147,6 +151,7 @@ async function run(
     createdBy: uid,
     createdAt: Date.now(),
     modelVersion: matrix.modelVersion,
+    mapsApi: matrix.mapsApi,
     solverVersion: result.solverVersion,
     // Firestore は配列の配列を保存できないため、入力（行列を含む）は JSON 文字列で残す（再現用）
     inputJson: JSON.stringify(solveReq),

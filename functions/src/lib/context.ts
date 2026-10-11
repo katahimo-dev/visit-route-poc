@@ -36,7 +36,7 @@ export function requireManager(c: Caller, requestedOrgId: string | null = null):
     return orgId;
   }
   if (c.role === 'admin' && c.orgId) return c.orgId;
-  throw new HttpsError('permission-denied', 'この操作は管理者だけができます');
+  throw new HttpsError('permission-denied', 'この操作は管理者のみ可能です');
 }
 
 export function parse<T extends z.ZodType>(schema: T, data: unknown): z.infer<T> {

@@ -68,7 +68,7 @@ export function VisitForm({
         note: form.note,
       });
       if (data.latestStart < data.earliestStart) {
-        setError('「いちばん遅い開始」は「いちばん早い開始」より後にしてください');
+        setError('「最も遅い開始時刻」は「最も早い開始時刻」より後にしてください');
         return;
       }
       await setDoc(doc(db, 'orgs', orgId, 'visits', visit?.id ?? crypto.randomUUID()), data);
@@ -81,12 +81,12 @@ export function VisitForm({
 
   return (
     <div className="card stack">
-      <h3>{visit ? '訪問を直す' : '訪問を足す'}</h3>
+      <h3>{visit ? '訪問を編集' : '訪問を追加'}</h3>
       <div className="form-grid">
         <label>
           {terms.client}
           <select value={form.clientId} onChange={(e) => setForm({ ...form, clientId: e.target.value })}>
-            <option value="">選んでください</option>
+            <option value="">選択してください</option>
             {clients
               .filter((c) => c.active || c.id === form.clientId)
               .map((c) => (
@@ -107,7 +107,7 @@ export function VisitForm({
           </select>
         </label>
         <label>
-          {form.windowKind === 'fixed' ? '開始時刻' : 'いちばん早い開始'}
+          {form.windowKind === 'fixed' ? '開始時刻' : '最も早い開始時刻'}
           <input
             type="time"
             value={form.earliestStart}
@@ -116,7 +116,7 @@ export function VisitForm({
         </label>
         {form.windowKind === 'window' && (
           <label>
-            いちばん遅い開始
+            最も遅い開始時刻
             <input
               type="time"
               value={form.latestStart}
@@ -145,7 +145,7 @@ export function VisitForm({
           保存
         </button>
         <button type="button" className="btn" onClick={onClose}>
-          やめる
+          キャンセル
         </button>
       </div>
     </div>

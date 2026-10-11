@@ -15,6 +15,7 @@ DEFAULT_TRAVEL_WEIGHT = 1.0
 DEFAULT_WAIT_WEIGHT = 0.3
 DEFAULT_TIME_LIMIT_SECONDS = 20
 DEFAULT_SOLUTION_LIMIT = 2000
+MAX_BREAKS = 4
 
 
 @dataclass(frozen=True)
@@ -26,6 +27,8 @@ class Staff:
     shift_start: int  # 00:00 からの秒
     shift_end: int
     max_visits: int | None
+    # 勤務時間の中の休み [(開始秒, 終了秒), ...]。開始の順・重なりなし・勤務時間の内側（ADR-0008）
+    breaks: tuple[tuple[int, int], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -163,8 +166,9 @@ def parse_request(body: Any) -> SolveRequest:
         mv = s.get("maxVisits")
         if mv is not None and (not _is_int(mv) or mv < 0):
             errs[f"{p}.maxVisits"] = "0以上の整数で指定してください"
+        breaks = _parse_breaks(s.get("breaks"), ss, se, f"{p}.breaks", errs)
         if not any(k.startswith(p) for k in errs):
-            staff_list.append(Staff(sid, gender, sp, ep, ss, se, mv))
+            staff_list.append(Staff(sid, gender, sp, ep, ss, se, mv, breaks))
 
     # --- visits ---
     visit_list: list[Visit] = []
@@ -269,6 +273,43 @@ def parse_request(body: Any) -> SolveRequest:
         time_limit_seconds=tl,
         solution_limit=sl,
     )
+
+
+def _parse_breaks(
+    raw: Any, shift_start: int | None, shift_end: int | None, p: str, errs: dict[str, str]
+) -> tuple[tuple[int, int], ...]:
+    """staff[i].breaks を検証する。省略・空配列は休みなし。違反は errs に足す。"""
+    if raw is None:
+        return ()
+    if not isinstance(raw, list) or len(raw) > MAX_BREAKS:
+        errs[p] = f"{MAX_BREAKS}件以下の配列で指定してください"
+        return ()
+    out: list[tuple[int, int]] = []
+    for j, b in enumerate(raw):
+        q = f"{p}[{j}]"
+        if not isinstance(b, dict):
+            errs[q] = "start と end を持つオブジェクトで指定してください"
+            continue
+        bs, be = _hhmm(b.get("start")), _hhmm(b.get("end"))
+        if bs is None:
+            errs[f"{q}.start"] = "HH:MM 形式で指定してください"
+        if be is None:
+            errs[f"{q}.end"] = "HH:MM 形式で指定してください"
+        if bs is None or be is None:
+            continue
+        if bs >= be:
+            errs[f"{q}.end"] = "start より後の時刻にしてください"
+            continue
+        if shift_start is not None and shift_end is not None and (
+            bs < shift_start or be > shift_end
+        ):
+            errs[q] = "shiftStart〜shiftEnd の内側にしてください"
+            continue
+        if out and bs < out[-1][1]:
+            errs[f"{q}.start"] = "前の休みの end 以降にしてください（開始の順・重なりなし）"
+            continue
+        out.append((bs, be))
+    return tuple(out)
 
 
 def _check_square(raw: Any, n: int, *, allow_negative: bool) -> tuple[bool, list[list[int]]]:

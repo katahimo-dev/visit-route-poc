@@ -34,6 +34,23 @@ describe('evaluateRoute', () => {
     expect(r.stops[1]?.late).toBe(true);
     expect(r.violations).toBe(1);
   });
+
+  it('作業が休みにかかるなら休み明けまで待って始め、約束の幅に収まれば違反にしない（休みは待ちに数えない）', () => {
+    const lunch = { ...staff, breaks: [{ start: '10:30', end: '11:00' }] };
+    const r = evaluateRoute(lunch, [a, b], m);
+    expect(r.stops[1]).toMatchObject({ arrival: 615, start: 660, waitMinutes: 30 - 15 });
+    expect(r.violations).toBe(0);
+    // 時間の固定された訪問は、休み明けまで待つと遅れる
+    const fixed = { ...b, latestStart: '10:00' };
+    expect(evaluateRoute(lunch, [a, fixed], m).violations).toBe(1);
+  });
+  it('移動が休みにかかるのはよい', () => {
+    const morning = { ...staff, breaks: [{ start: '08:30', end: '09:00' }] };
+    expect(evaluateRoute(morning, [a, b], m).violations).toBe(0);
+  });
+  it('休みの日に担当がある人は、訪問1件ごとに違反', () => {
+    expect(evaluateRoute({ ...staff, off: true }, [a, b], m).violations).toBe(2);
+  });
 });
 
 describe('evaluatePlan', () => {

@@ -7,6 +7,7 @@ from typing import Any
 
 import ortools
 
+from .diagnose import avoid_breaks
 from .request import SolveRequest, parse_request
 from .routing import solve_routing, unassigned_with_reasons
 
@@ -21,6 +22,11 @@ def _fmt(seconds: int) -> str:
     """秒 → HH:MM（切り捨て）。時間枠は分単位なので、切り捨てで枠を超えて見えることはない。"""
     m = max(seconds, 0) // 60
     return f"{m // 60:02d}:{m % 60:02d}"
+
+
+def _overlap(a: int, b: int, breaks: tuple[tuple[int, int], ...]) -> int:
+    """区間 [a, b) が休みと重なる秒数。"""
+    return sum(max(0, min(b, be) - max(a, bs)) for bs, be in breaks)
 
 
 def _build_route(req: SolveRequest, staff_idx: int, seq: list[int]) -> tuple[dict, int, int, int]:
@@ -38,18 +44,25 @@ def _build_route(req: SolveRequest, staff_idx: int, seq: list[int]) -> tuple[dic
         gap = v.min_gap_seconds if prev_visit is not None else 0
         arrival = t + leg + gap
         start = max(arrival, v.earliest_start)
+        # 作業が休みにかかるなら休み明けまで遅らせる（求解でも同じ条件を課している）。
+        # 移動は休みにかかってよいので、到着は前詰めのまま
+        start = avoid_breaks(start, v.duration_seconds, s.breaks)
         if k == 0:
             # 出発を遅らせて、最初の訪問先では待たない（待つなら自宅で待つ）
             depart = max(s.shift_start, start - leg)
             arrival = depart + leg
-        wait = start - arrival
+        # 待ちは到着から開始までのうち、休みでない時間（休みは待ちに数えない）
+        wait = start - arrival - _overlap(arrival, start, s.breaks)
+        # 表示は分に切り捨てた時刻の差（休みは分単位なので、切り捨てた到着から数える）
+        a_min = arrival // 60 * 60
+        wait_minutes = max(0, (start // 60 * 60 - a_min - _overlap(a_min, start, s.breaks)) // 60)
         stops.append(
             {
                 "visitId": v.visit_id,
                 "arrival": _fmt(arrival),
                 "start": _fmt(start),
                 "end": _fmt(start + v.duration_seconds),
-                "waitMinutes": max(0, start // 60 - arrival // 60),
+                "waitMinutes": wait_minutes,
             }
         )
         travel_total += leg

@@ -94,6 +94,18 @@ components:
         endPoint: { type: integer, description: matrix.points の添字（帰宅先） }
         shiftStart: { type: string, pattern: "^\\d{2}:\\d{2}$" }
         shiftEnd: { type: string, pattern: "^\\d{2}:\\d{2}$" }
+        breaks:
+          type: array
+          maxItems: 4
+          description: >-
+            勤務時間の中の休み（時間休）。開始の順・重なりなし・shiftStart〜shiftEnd の内側。
+            訪問（到着後の作業時間）は休みに重ならない。移動は休みにかかってもよい（ADR-0008）
+          items:
+            type: object
+            required: [start, end]
+            properties:
+              start: { type: string, pattern: "^\\d{2}:\\d{2}$" }
+              end: { type: string, pattern: "^\\d{2}:\\d{2}$" }
         maxVisits: { type: integer, minimum: 0 }
     VisitInput:
       type: object

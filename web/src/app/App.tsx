@@ -20,8 +20,8 @@ function Gate() {
     return (
       <div className="staff-shell stack">
         <div className="card stack">
-          <h2>まだ使えません</h2>
-          <p>このメールアドレスは事業所に登録されていません。事業所の管理者に招待を頼んでください。</p>
+          <h2>利用できません</h2>
+          <p>このメールアドレスは事業所に登録されていません。事業所の管理者に招待を依頼してください。</p>
           <button type="button" className="btn" onClick={() => logout()}>
             ログアウト
           </button>

@@ -7,17 +7,17 @@ import { useSession } from '../../lib/session';
 import { useOrgCollection, useOrgDoc } from '../../lib/useCollection';
 
 const FIELDS = [
-  ['arrive', '着いた'],
-  ['start', 'はじめた'],
-  ['end', 'おわった'],
-  ['depart', '出た'],
+  ['arrive', '到着'],
+  ['start', '開始'],
+  ['end', '終了'],
+  ['depart', '退出'],
 ] as const;
 
 const eff = (v: AttendanceVisit, f: (typeof FIELDS)[number][0]) => v.corrections[f] ?? v[f];
 const STATUS: Record<AttendanceDay['status'], string> = {
-  candidate: '確認まち',
-  confirmed_by_staff: '確認ずみ（承認まち）',
-  approved: '承認ずみ',
+  candidate: '確認待ち',
+  confirmed_by_staff: '確認済み（承認待ち）',
+  approved: '承認済み',
 };
 
 /** きんむ：きょうの到着・退出の確認と訂正（勤怠候補。自動では確定しない） */
@@ -34,8 +34,8 @@ export function AttendancePage({ date }: { date: string }) {
   if (day === null) {
     return (
       <div className="card">
-        <h2>きょうのきんむ</h2>
-        <p>まだ記録がありません。「はじめる」を押すと記録されます。</p>
+        <h2>今日の勤務</h2>
+        <p>まだ記録がありません。「勤務を開始」を押すと記録されます。</p>
       </div>
     );
   }
@@ -47,7 +47,7 @@ export function AttendancePage({ date }: { date: string }) {
 
   const correct = async (v: AttendanceVisit, field: (typeof FIELDS)[number][0], hhmm: string) => {
     if (!hhmm) return;
-    const note = prompt('直す理由（例：押しわすれ）') ?? '';
+    const note = prompt('訂正の理由（例：押し忘れ）') ?? '';
     setBusy(true);
     try {
       await call('correctAttendance', {
@@ -59,7 +59,7 @@ export function AttendancePage({ date }: { date: string }) {
         note,
         version: day.version,
       });
-      toast('直しました');
+      toast('訂正しました');
     } catch (e) {
       toast(messageOf(e));
     } finally {
@@ -83,14 +83,14 @@ export function AttendancePage({ date }: { date: string }) {
   return (
     <>
       <div className="spread">
-        <h2>きょうのきんむ</h2>
+        <h2>今日の勤務</h2>
         <span className={`chip ${locked ? 'chip-ok' : 'chip-warn'}`}>{STATUS[day.status]}</span>
       </div>
       <div className="card row" style={{ justifyContent: 'space-around', textAlign: 'center' }}>
         {[
-          ['はたらいた', t.workMinutes],
+          ['実働', t.workMinutes],
           ['移動', t.travelMinutes],
-          ['休けい', t.breakMinutes],
+          ['休憩', t.breakMinutes],
         ].map(([label, m]) => (
           <div key={label as string}>
             <div className="sub">{label}</div>
@@ -114,8 +114,8 @@ export function AttendancePage({ date }: { date: string }) {
               return (
                 <label key={f}>
                   {label}
-                  {f === 'arrive' && v.arriveFilled && <span className="chip">はじめた時刻で記録</span>}
-                  {v.corrections[f] !== undefined && <span className="chip chip-warn">直した</span>}
+                  {f === 'arrive' && v.arriveFilled && <span className="chip">開始時刻で記録</span>}
+                  {v.corrections[f] !== undefined && <span className="chip chip-warn">訂正済み</span>}
                   <input
                     type="time"
                     disabled={locked || busy}
@@ -129,7 +129,7 @@ export function AttendancePage({ date }: { date: string }) {
               );
             })}
           </div>
-          {v.changed && <span className="chip chip-warn">予定と15分以上ちがいます</span>}
+          {v.changed && <span className="chip chip-warn">予定と15分以上違います</span>}
         </div>
       ))}
       {!locked && (
@@ -139,10 +139,10 @@ export function AttendancePage({ date }: { date: string }) {
           disabled={busy || day.status === 'confirmed_by_staff'}
           onClick={confirmDay}
         >
-          {day.status === 'confirmed_by_staff' ? '確認ずみ' : 'この内容で合っています'}
+          {day.status === 'confirmed_by_staff' ? '確認済み' : 'この内容で合っています'}
         </button>
       )}
-      {locked && <p className="sub">承認ずみです。直したいときは事業所に連絡してください。</p>}
+      {locked && <p className="sub">承認済みです。訂正は事業所に連絡してください。</p>}
     </>
   );
 }

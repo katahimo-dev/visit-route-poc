@@ -31,14 +31,14 @@ export function TodayPage({ day }: { day: ReturnType<typeof useStaffDay> }) {
   return (
     <>
       <div className="spread">
-        <h2>きょうの回る順番</h2>
+        <h2>今日の訪問順</h2>
         <span className="chip">
-          {MODE_ICON[mode]} 移動 あわせて約{total}分
+          {MODE_ICON[mode]} 移動 合計 約{total}分
         </span>
       </div>
       {points.length > 0 && <RouteMap points={points} lines={[line]} height={240} />}
       <div className="card">
-        {day.stops.length === 0 && <p>きょうの訪問はありません</p>}
+        {day.stops.length === 0 && <p>今日の訪問はありません</p>}
         {day.stops.map((st, i) => {
           const from = i === 0 ? home : day.stops[i - 1]?.client?.place;
           const mins = legMinutes(from, st.client?.place, mode);
