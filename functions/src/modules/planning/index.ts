@@ -8,6 +8,7 @@ import {
   jstToMs,
   minutesToHhmm,
   type Org,
+  routeViews,
   type Staff,
   type TravelMode,
 } from '@vrp/shared';
@@ -139,6 +140,12 @@ async function run(
 
   const evalM = toEvalMatrix(prepared.points, matrix.seconds, matrix.meters);
   const aiRoutes = Object.fromEntries(result.routes.map((r) => [r.staffId, r.stops.map((s) => s.visitId)]));
+  // 地図APIを使ったときだけ、同じ順番を概算で計算した値を並べる（使わなければ同じ値なので出さない）
+  const estM = matrix.mapsApi ? toEvalMatrix(prepared.points, matrix.estimateSeconds, matrix.meters) : null;
+  const views = {
+    manual: routeViews(manualRoutes, prepared.staffIn, prepared.visitsIn, evalM, estM),
+    ai: routeViews(aiRoutes, prepared.staffIn, prepared.visitsIn, evalM, estM),
+  };
   const metrics = {
     manual: evaluatePlan(manualRoutes, prepared.staffIn, prepared.visitsIn, evalM, org.fareYenPerKm),
     ai: evaluatePlan(aiRoutes, prepared.staffIn, prepared.visitsIn, evalM, org.fareYenPerKm),
@@ -160,6 +167,7 @@ async function run(
     manualMinutesSpent: manual?.minutesSpent ?? null,
     result,
     metrics,
+    views,
     skipped: prepared.skipped,
     computeMillis: elapsed,
   });

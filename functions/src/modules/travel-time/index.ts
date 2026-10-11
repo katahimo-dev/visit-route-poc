@@ -2,6 +2,7 @@ import {
   type AttendanceDay,
   type Client,
   distanceMeters,
+  estimateLeg,
   hhmmToMinutes,
   jstHhmm,
   type LatLng,
@@ -38,6 +39,8 @@ export type PredictedMatrix = {
   meters: number[][];
   baseSeconds: number[][];
   modelVersion: string;
+  /** 同じ区間を直線距離の概算で求め、同じ補正をかけた値（地図APIとの差を見せる。秒） */
+  estimateSeconds: number[][];
   /** 実際に地図API（Google Routes）の値を使ったか。使うかどうかは事業所の設定 useMapsApi（既定 true） */
   mapsApi: boolean;
 };
@@ -65,6 +68,9 @@ export async function predictMatrix(
     baseSeconds: base.map((row) => row.map((l) => l.seconds)),
     seconds: base.map((row) => row.map((l) => applyModel(l.seconds, m, key))),
     meters: base.map((row) => row.map((l) => l.meters)),
+    estimateSeconds: points.map((a, i) =>
+      points.map((b, j) => (i === j ? 0 : applyModel(estimateLeg(a, b, mode).seconds, m, key))),
+    ),
     modelVersion: usedFallback ? `${m.version}+fallback` : m.version,
     mapsApi,
   };

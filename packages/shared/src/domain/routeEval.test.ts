@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { type EvalMatrix, evaluatePlan, evaluateRoute } from './routeEval';
+import { type EvalMatrix, evaluatePlan, evaluateRoute, routeViews } from './routeEval';
 
 const m: EvalMatrix = {
   index: { 'staff/s1': 0, 'clients/a': 1, 'clients/b': 2 },
@@ -58,5 +58,28 @@ describe('evaluatePlan', () => {
     const p = evaluatePlan({ s1: ['va', 'vb'] }, [staff], { va: a, vb: b }, m, 10);
     expect(p.fareYen).toBe(220);
     expect(p.perStaff.s1?.visitCount).toBe(2);
+  });
+});
+
+describe('routeViews', () => {
+  const est: EvalMatrix = { ...m, seconds: m.seconds.map((row) => row.map((x) => x / 2)) };
+  it('手作業案・AI案を同じ形で、区間の移動と概算の値を並べる', () => {
+    const v = routeViews({ s1: ['va', 'vb'] }, [staff], { va: a, vb: b }, m, est);
+    expect(v.s1?.stops).toEqual([
+      { visitId: 'va', start: 540, end: 600, travelMinutes: 10, estimateMinutes: 5, late: false },
+      { visitId: 'vb', start: 615, end: 675, travelMinutes: 15, estimateMinutes: 7.5, late: false },
+    ]);
+    expect(v.s1).toMatchObject({
+      backMinutes: 20,
+      backEstimateMinutes: 10,
+      travelMinutes: 45,
+      estimateTravelMinutes: 22.5,
+    });
+  });
+  it('概算が無ければ null。訪問の無い人は出さない', () => {
+    const v = routeViews({ s1: ['va'] }, [staff, { ...staff, staffId: 's2' }], { va: a }, m, null);
+    expect(v.s1?.stops[0]?.estimateMinutes).toBeNull();
+    expect(v.s1?.estimateTravelMinutes).toBeNull();
+    expect(v.s2).toBeUndefined();
   });
 });

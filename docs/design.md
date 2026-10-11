@@ -145,7 +145,7 @@ flowchart LR
 ### travel-time（移動時間予測AI）
 - 責務：区間（出発地→到着地・移動手段・時間帯）の**基準移動時間**を地図APIで取り、実測から作った補正で**予測移動時間**を返す。地図APIに聞くのは各地点の近傍10地点との区間だけで、残りは直線距離の概算を実測で補正して埋める（ADR-0004）。実測区間の収集と、補正モデルの学習・版管理。事業所の設定 `useMapsApi` が false なら地図APIを呼ばず、すべて直線距離の概算にする（AI案に、どちらを使ったかを残す）。
 - 持つデータ（持ち主）：`legCache`（基準値、30日。キーは区間×移動手段×時間帯。ルートなしも記録）、`travelModels`（補正係数表＝時間帯×曜日区分×移動手段×距離帯→倍率、学習に使った件数）、`legActuals`（実測区間＝前の退出→次の到着、予測値・基準値・モデル版・OSRMの値・直線距離つき）
-- 提供するAPI：内部関数 `predictMatrix(points, mode, departBand) → {seconds[][], meters[][], modelVersion}`（planning から呼ぶ）、`trainModel()`（Callable、運営者のみ。α は係数表、改で1回目の実データから再学習）。
+- 提供するAPI：内部関数 `predictMatrix(points, mode, departBand) → {seconds[][], meters[][], estimateSeconds[][]（同じ区間の直線距離の概算）, modelVersion, mapsApi（実際に地図APIを使ったか）}`（planning から呼ぶ）、`trainModel()`（Callable、運営者のみ。α は係数表、改で1回目の実データから再学習）。
 - 依存するもの：Google Routes API（Compute Route Matrix）、経路エンジン（OSRM。実測区間の比較値だけ。予測には使わない）、field（実測の到着・退出）。
 - 配置：`functions/src/modules/travel-time/`、学習ノートブックは `analysis/`
 - 完了の条件：
@@ -169,7 +169,7 @@ flowchart LR
 
 ### planning（AI案の生成・比較・決定）
 - 責務：その日の訪問・スタッフ・予測行列を集めて optimizer を呼び、**AI案**として保存。手作業案とAI案を同じ予測行列で再計算して比較（移動時間・距離・交通費・待ち時間・条件違反）。管理者の手直しと決定、理由の記録。前夜の自動生成とおすすめ通知（改）。
-- 持つデータ（持ち主）：`planRuns`（入力のスナップショット・モデル版・ソルバー版・結果＝AI案・計算時間）、`planRunLocks`（requestId ごとの実行の鍵。二重実行の防止と、1時間20回の上限の数え上げ）、`comparisons`（日付×実行ごと）、`decidedPlans`（日付ごと。決定案・決定者・理由・元にした案）、`recommendations`（日付×スタッフ。通知と返答）
+- 持つデータ（持ち主）：`planRuns`（入力のスナップショット・モデル版・ソルバー版・結果＝AI案・計算時間・表示用の時刻と区間＝手作業案とAI案を同じ行列で計算したもの。地図APIを使ったときは同じ区間の概算の値も）、`planRunLocks`（requestId ごとの実行の鍵。二重実行の防止と、1時間20回の上限の数え上げ）、`comparisons`（日付×実行ごと）、`decidedPlans`（日付ごと。決定案・決定者・理由・元にした案）、`recommendations`（日付×スタッフ。通知と返答）
 - 提供するAPI：`createPlanRun(date)`、`comparePlans(date, runId)`、`decidePlan(date, base, edits, reason)`、`respondRecommendation(id, answer)`（Callable）。スケジュール関数 `nightlyPlan`（毎晩、翌日分。1回目は通知しない）。
 - 依存するもの：schedule、travel-time、optimizer、org（スタッフの勤務時間はその日の稼働時間帯。ADR-0008）、FCM。
 - 配置：`functions/src/modules/planning/`、`web/src/features/admin/planning/`

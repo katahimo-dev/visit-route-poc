@@ -169,3 +169,63 @@ export function evaluatePlan(
   out.fareYen = Math.round((out.meters / 1000) * fareYenPerKm);
   return out;
 }
+
+/** 画面に出す1件の訪問（分は 0時から）。estimateMinutes は直線距離の概算での前の区間の移動（比べる値が無ければ null） */
+export type StopView = {
+  visitId: string;
+  start: number;
+  end: number;
+  travelMinutes: number;
+  estimateMinutes: number | null;
+  late: boolean;
+};
+/** 画面に出す1人のルート（手作業案・AI案を同じ形で並べる） */
+export type RouteView = {
+  stops: StopView[];
+  /** 最後の訪問から自宅まで */
+  backMinutes: number;
+  backEstimateMinutes: number | null;
+  /** 自宅→訪問→自宅の移動の合計 */
+  travelMinutes: number;
+  estimateTravelMinutes: number | null;
+};
+
+const r1 = (n: number) => Math.round(n * 10) / 10;
+
+/**
+ * 手作業案・AI案を、同じ行列で時刻計算した表示用のルート（スタッフ別）。
+ * estimate を渡すと、同じ順番を概算の行列で計算した区間の移動も並べる（地図APIとの差を見せる）
+ */
+export function routeViews(
+  routes: Record<string, string[]>,
+  staff: EvalStaff[],
+  visitsById: Record<string, EvalVisit>,
+  m: EvalMatrix,
+  estimate: EvalMatrix | null,
+): Record<string, RouteView> {
+  const out: Record<string, RouteView> = {};
+  for (const s of staff) {
+    const vs = (routes[s.staffId] ?? []).map((id) => visitsById[id]).filter((v): v is EvalVisit => v !== undefined);
+    if (vs.length === 0) continue;
+    const r = evaluateRoute(s, vs, m);
+    const e = estimate ? evaluateRoute(s, vs, estimate) : null;
+    const lastPoint = vs[vs.length - 1]?.pointId ?? s.homePointId;
+    const back = leg(m, lastPoint, s.homePointId);
+    const backE = estimate ? leg(estimate, lastPoint, s.homePointId) : null;
+    out[s.staffId] = {
+      stops: r.stops.map((x) => ({
+        visitId: x.visitId,
+        start: Math.round(x.start),
+        end: Math.round(x.end),
+        travelMinutes: r1(x.travelMinutes),
+        estimateMinutes: e ? r1(e.stops.find((y) => y.visitId === x.visitId)?.travelMinutes ?? 0) : null,
+        late: x.late,
+      })),
+      backMinutes: r1((back?.sec ?? 0) / 60),
+      backEstimateMinutes: backE ? r1(backE.sec / 60) : null,
+      travelMinutes: r1(r.travelSeconds / 60),
+      estimateTravelMinutes: e ? r1(e.travelSeconds / 60) : null,
+    };
+  }
+  return out;
+}
