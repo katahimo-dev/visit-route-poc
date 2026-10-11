@@ -69,7 +69,10 @@ export function RouteMap({
     }
     const all = [...points, ...lines.flatMap((l) => l.points)];
     if (all.length > 0)
-      m.fitBounds(L.latLngBounds(all.map((p) => [p.lat, p.lng] as [number, number])).pad(0.1), { maxZoom: 15, animate: false });
+      m.fitBounds(L.latLngBounds(all.map((p) => [p.lat, p.lng] as [number, number])).pad(0.1), {
+        maxZoom: 15,
+        animate: false,
+      });
   }, [points, lines]);
 
   return <div ref={el} className="map" style={{ height }} />;
