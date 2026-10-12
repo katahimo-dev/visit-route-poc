@@ -168,8 +168,8 @@ flowchart LR
   - [ ] 守れない訪問に原因（`time_window` / `shift` / `gender` / `ng_staff` / `unreachable`）が付く
 
 ### planning（AI案の生成・比較・決定）
-- 責務：その日の訪問・スタッフ・予測行列を集めて optimizer を呼び、**AI案**として保存。手作業案とAI案を同じ予測行列で再計算して比較（移動時間・距離・交通費・待ち時間・条件違反）。管理者の手直しと決定、理由の記録。前夜の自動生成とおすすめ通知（改）。
-- 持つデータ（持ち主）：`planRuns`（入力のスナップショット・モデル版・ソルバー版・結果＝AI案・計算時間・表示用の時刻と区間＝手作業案とAI案を同じ行列で計算したもの。地図APIを使ったときは同じ区間の概算の値も）、`planRunLocks`（requestId ごとの実行の鍵。二重実行の防止と、1時間20回の上限の数え上げ）、`comparisons`（日付×実行ごと）、`decidedPlans`（日付ごと。決定案・決定者・理由・元にした案）、`recommendations`（日付×スタッフ。通知と返答）
+- 責務：その日の訪問・スタッフ・予測行列を集めて、**パラメータ**（待ち時間の重み・訪問のあいだの余裕・1人の件数の上限・移動時間の求め方。プリセット3種。ADR-0009）で optimizer を呼び、**AI案**としてパラメータと組で保存。同じ日のAI案どうしを並べて比較し、選んだ案を予定にする（その日のAI案が無ければ第1プリセットで自動で作り、割当が無ければ予定にする）。手作業案があれば同じ予測行列で再計算して比較（移動時間・距離・交通費・待ち時間・条件違反）。管理者の手直しと決定、理由の記録。前夜の自動生成とおすすめ通知（改）。
+- 持つデータ（持ち主）：`planRuns`（パラメータ・プリセット・入力のスナップショット・モデル版・ソルバー版・結果＝AI案・計算時間・表示用の時刻と区間＝手作業案とAI案を同じ行列で計算したもの。地図APIを使ったときは同じ区間の概算の値も）、`planRunLocks`（requestId ごとの実行の鍵。二重実行の防止と、1時間20回の上限の数え上げ）、`comparisons`（日付×実行ごと）、`decidedPlans`（日付ごと。決定案・決定者・理由・元にした案）、`recommendations`（日付×スタッフ。通知と返答）
 - 提供するAPI：`createPlanRun(date)`、`comparePlans(date, runId)`、`decidePlan(date, base, edits, reason)`、`respondRecommendation(id, answer)`（Callable）。スケジュール関数 `nightlyPlan`（毎晩、翌日分。1回目は通知しない）。
 - 依存するもの：schedule、travel-time、optimizer、org（スタッフの勤務時間はその日の稼働時間帯。ADR-0008）、FCM。
 - 配置：`functions/src/modules/planning/`、`web/src/features/admin/planning/`

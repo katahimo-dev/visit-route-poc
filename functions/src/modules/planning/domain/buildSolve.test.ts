@@ -176,3 +176,29 @@ describe('prepare：休止中の人', () => {
     expect(p.skipped).toContainEqual({ kind: 'staff', id: 's1', reason: 'inactive' });
   });
 });
+
+describe('prepare：AI案のパラメータ（ADR-0009）', () => {
+  const base = {
+    org,
+    staff: [staff('s1', 38.2), staff('s2', 38.21)],
+    clients: new Map([['c1', client(38.3)]]),
+    visits: [visit('v1', 'c1', null)],
+    manualRoutes: {},
+    availability: new Map([['s2', { slots: [] }]]),
+  };
+  it('件数の上限は働く人だけに付け、休みの人は0件のまま', () => {
+    const p = prepare(
+      { ...base, manualRoutes: { s2: ['v1'] }, params: { minGapMinutes: 0, maxVisitsPerStaff: 3 } },
+      '2026-10-19',
+    );
+    expect(p.request.staff.find((s) => s.staffId === 's1')).toMatchObject({ maxVisits: 3 });
+    expect(p.request.staff.find((s) => s.staffId === 's2')).toMatchObject({ maxVisits: 0 });
+  });
+  it('訪問のあいだの余裕を全訪問に付ける。0 なら付けない', () => {
+    const gap = prepare({ ...base, params: { minGapMinutes: 10, maxVisitsPerStaff: null } }, '2026-10-19');
+    expect(gap.request.visits[0]).toMatchObject({ minGapBeforeMinutes: 10 });
+    expect(gap.request.staff[0]).not.toHaveProperty('maxVisits');
+    const none = prepare({ ...base, params: { minGapMinutes: 0, maxVisitsPerStaff: null } }, '2026-10-19');
+    expect(none.request.visits[0]).not.toHaveProperty('minGapBeforeMinutes');
+  });
+});

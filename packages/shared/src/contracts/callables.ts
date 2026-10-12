@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { dateSchema } from './documents';
+import { DEFAULT_PLAN_PARAMS, planParamsSchema } from './planParams';
 
 /** 業務関数（Callable）の入出力。design.md §5 */
 
@@ -52,6 +53,8 @@ export const createPlanRunRequest = z.object({
   date: dateSchema,
   requestId: z.string().min(8).max(64),
   orgId: orgIdField,
+  /** AI案のパラメータ（省略は第1プリセット。ADR-0009） */
+  params: planParamsSchema.default(DEFAULT_PLAN_PARAMS),
 });
 export const createPlanRunResponse = z.object({ runId: z.string() });
 
