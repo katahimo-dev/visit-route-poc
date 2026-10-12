@@ -8,6 +8,8 @@ import {
   jstToMs,
   minutesToHhmm,
   type Org,
+  type PlanParams,
+  presetIdOf,
   routeViews,
   type Staff,
   type TravelMode,
@@ -54,14 +56,15 @@ function majorityMode(staff: Staff[]): TravelMode {
 }
 
 /**
- * 指定日のAI案を作り、手作業案と同じ行列で比べた指標と一緒に planRuns に保存する。
- * AI案は予定を書き換えない（決定は改修版の decidePlan）。requestId が同じなら最初の結果を返す。
+ * 指定日のAI案をパラメータ（ADR-0009）で作り、パラメータ・指標・表示用の時刻と区間と一緒に planRuns に保存する。
+ * 手作業案（予定画面の割当）があれば同じ行列で計算した値も残す（実証データの計画値比較）。
+ * AI案は予定を書き換えない（予定にするのは管理者が画面で行う）。requestId が同じなら最初の結果を返す。
  */
 export const createPlanRun = onCall(
   { region: REGION, timeoutSeconds: 120, memory: '512MiB', secrets: [MAPS_SERVER_KEY] },
   async (req) => {
     const c = callerOf(req);
-    const { date, requestId, orgId: requestedOrgId } = parse(createPlanRunRequest, req.data);
+    const { date, requestId, params, orgId: requestedOrgId } = parse(createPlanRunRequest, req.data);
     const orgId = requireManager(c, requestedOrgId);
     const runId = requestId.replace(/[^A-Za-z0-9_-]/g, '');
     if (runId.length < 8)
@@ -71,7 +74,7 @@ export const createPlanRun = onCall(
     const runRef = col(orgId, 'planRuns').doc(runId);
     if (!(await acquireRun(orgId, runId, c.uid))) return { runId };
     try {
-      await run(orgId, runId, runRef, date, requestId, c.uid);
+      await run(orgId, runId, runRef, date, requestId, params, c.uid);
     } catch (e) {
       // 失敗したら鍵を外し、同じ requestId でやり直せるようにする
       await col(orgId, 'planRunLocks')
@@ -90,6 +93,7 @@ async function run(
   runRef: FirebaseFirestore.DocumentReference,
   date: string,
   requestId: string,
+  params: PlanParams,
   uid: string,
 ): Promise<void> {
   const [orgSnap, staffSnap, clientSnap, privateSnap, visits, manual, availSnap] = await Promise.all([
@@ -114,17 +118,18 @@ async function run(
     availSnap.docs.map((d) => [(d.data() as Availability).staffId, d.data() as Availability]),
   );
 
-  const prepared = prepare({ org, staff, clients, visits, manualRoutes, availability }, date);
+  const prepared = prepare({ org, staff, clients, visits, manualRoutes, availability, params }, date);
   if (prepared.staffIn.length === 0)
     throw new HttpsError('failed-precondition', '対象のスタッフがいません（自宅の位置・稼働時間帯を確認してください）');
   const firstStart = Math.min(...visits.map((v) => hhmmToMinutes(v.earliestStart)));
   const departAt = jstToMs(date, minutesToHhmm(Math.max(0, firstStart - 30)));
   const mode = majorityMode(staff.filter((s) => prepared.staffIn.some((x) => x.staffId === s.id)));
-  const matrix = await predictMatrix(orgId, prepared.points, mode, date, departAt);
+  const matrix = await predictMatrix(orgId, prepared.points, mode, date, departAt, undefined, params.mapsApi);
 
   const solveReq = {
     ...prepared.request,
     requestId: runId,
+    weights: { travelSeconds: 1, waitSeconds: params.waitWeight },
     // 解の数で打ち切る（同じ入力で同じ結果。8人×30件で約5秒）。時間は安全弁
     limits: { solutionLimit: 500, timeLimitSeconds: 25 },
     matrix: {
@@ -153,6 +158,9 @@ async function run(
   await runRef.set({
     date,
     requestId,
+    // パラメータと、それで作った割当・順番を組で残す（AI案どうしを比べる。ADR-0009）
+    params,
+    presetId: presetIdOf(params),
     mode: org.optimizeMode,
     travelMode: mode,
     createdBy: uid,
@@ -165,6 +173,8 @@ async function run(
     baseSecondsJson: JSON.stringify(matrix.baseSeconds),
     manualRoutes,
     manualMinutesSpent: manual?.minutesSpent ?? null,
+    // 予定がAI案を採用したものなら、その AI案の ID（このときの metrics.manual は手作業案ではない。ADR-0009）
+    manualFromRunId: manual?.fromRunId ?? null,
     result,
     metrics,
     views,

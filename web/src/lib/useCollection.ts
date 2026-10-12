@@ -37,6 +37,8 @@ export function useOrgCollection<T>(orgId: string | null, name: string, constrai
 export function useOrgDoc<T>(orgId: string | null, name: string, id: string | null) {
   const [data, setData] = useState<T | null | undefined>(undefined);
   useEffect(() => {
+    // 文書が変わったら、読み込むまで前の文書の値を見せない
+    setData(undefined);
     if (!orgId || !id) return;
     return onSnapshot(
       doc(db, 'orgs', orgId, name, id),

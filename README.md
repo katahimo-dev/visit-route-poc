@@ -3,7 +3,7 @@
 仙台市「先端テクノロジー・データ利活用ユースケース創出支援事業」の実証（3事業所×4件、2回構成）で、協力法人に使ってもらうための PoC アプリ。
 
 - スタッフ（スマホ・PWA）：今日の訪問順、自分の働ける時間（シフト）の調整、訪問の開始・終了の記録、勤務中だけの位置計測とジオフェンスによる到着・退出、勤怠の確認と訂正
-- 管理者（PC）：スタッフ・訪問先・訪問予定・手作業の割当（ドラッグ）・稼働時間のカレンダーの登録、AI案（移動時間予測＋割当と順番の最適化）との比較、勤怠の承認と CSV
+- 管理者（PC）：スタッフ・訪問先・訪問予定・手作業の割当（ドラッグ）・稼働時間のカレンダーの登録、AI案（移動時間予測＋割当と順番の最適化）をパラメータ（プリセット3種）を変えて作り、任意の2案を比較して予定にする、勤怠の承認と CSV
 - 運営者：実証データ CSV（仮名ID）
 
 設計：[docs/prd.md](docs/prd.md)（要件・α版の最小構成 §9）／[docs/design.md](docs/design.md)／[docs/adr/](docs/adr/)／最適化 API [docs/api/openapi.yaml](docs/api/openapi.yaml)。
@@ -35,7 +35,7 @@ pnpm emulators                                               # Auth :9099 / Fire
 pnpm --filter web dev                                        # :5173
 
 pnpm seed     # デモデータ（仙台市の公共施設を擬人化した架空のスタッフ・利用者さん）
-pnpm smoke    # 通し確認（AI案 → 記録 → 勤怠 → 承認 → CSV）
+pnpm smoke    # 通し確認（プリセット違いのAI案 → 予定にする → 記録 → 勤怠 → 承認 → CSV）
 ```
 
 ログイン：`admin@example.com`（管理者）／`staff1〜8@example.com`（スタッフ）／`operator@example.com`（運営者）。
@@ -96,9 +96,9 @@ Hosting は1つのプロジェクトに複数のサイトを置いている（`.
 
 **デモ期間**（今の設定）
 - `functions/.env.corded-academy-502703-f5` に `DEMO_ORG_ID=demo`。Secret Manager に `DEMO_PASSWORD_HASH`（下）。画面は `web/.env.production.local` に `VITE_DEMO_LOGIN=true` を書いてビルド
-- データ：`SEED_PROJECT=corded-academy-502703-f5 pnpm seed`（GOOGLE_APPLICATION_CREDENTIALS か gcloud の ADC で。ADC の課金先が別のプロジェクトなら `GOOGLE_CLOUD_QUOTA_PROJECT=corded-academy-502703-f5` も付ける）。スタッフ8人・訪問先20か所・日ごとの稼働時間帯の上書き（時間休・休み・休日出勤・遅出）。予定は実行日から `SEED_UNTIL`（既定 2026-11-30）まで毎日入る（平日は17件前後、土日はスタッフ3人で8件）。入れ直すと実行日以降の予定・AI案は作り直す（同じ日は同じ予定になる。スタッフの記録がある日と、過去の記録・勤怠はそのまま）
+- データ：`SEED_PROJECT=corded-academy-502703-f5 pnpm seed`（GOOGLE_APPLICATION_CREDENTIALS か gcloud の ADC で。ADC の課金先が別のプロジェクトなら `GOOGLE_CLOUD_QUOTA_PROJECT=corded-academy-502703-f5` も付ける）。スタッフ8人・訪問先20か所・日ごとの稼働時間帯の上書き（時間休・休み・休日出勤・遅出）。訪問は実行日から `SEED_UNTIL`（既定 2026-11-30）まで毎日入る（平日は17件前後、土日は8件）。担当は入れない：管理者が「AI案」の画面でその日を開くと第1プリセットでAI案を作り、予定にする（ADR-0009。スタッフ画面はその割当で動く）。入れ直すと実行日以降の予定・AI案は作り直す（同じ日は同じ予定になる。スタッフの記録がある日と、過去の記録・勤怠はそのまま）
 - ログイン画面の「デモで試す」で簡易パスワードを入れると、管理者か、選んだスタッフとしてメールなしで入れる（スタッフは今日の件数つきで並ぶ）。パスワードのハッシュは Secret Manager の `DEMO_PASSWORD_HASH`（`pnpm tsx scripts/demoPasswordHash.ts <パスワード>` で作り、`firebase functions:secrets:set DEMO_PASSWORD_HASH` で置く。エミュレーターは `functions/.secret.local`）。リポジトリは公開なので、パスワードもハッシュもリポジトリに書かない。デモの印（`demo: true`）のある事業所にしか入れない
-- この間は招待が止まり、コードのログインは運営者だけになる（誰でも管理者になれるので、他人のアドレスへの送信の踏み台にしない）。移動時間に Google の地図API を使うかは、管理者が「AI案」の画面で切り替える（デモの既定は使わない＝直線距離の概算。使うには Secret Manager の `MAPS_SERVER_KEY` が要る）
+- この間は招待が止まり、コードのログインは運営者だけになる（誰でも管理者になれるので、他人のアドレスへの送信の踏み台にしない）。移動時間に Google の地図API を使うかは、管理者が「AI案」の画面でパラメータとして選ぶ（既定は使わない＝直線距離の概算。使うには Secret Manager の `MAPS_SERVER_KEY` が要る）
 - 運営者の作業（実証データの CSV 出力など）をデモ期間中にするなら Trigger Email を用意する。用意しなければ、運営者の作業は切り替え後に行う
 
 **本番への切り替え**（デモの評価と調整が終わってから）

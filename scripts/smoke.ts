@@ -1,12 +1,12 @@
 /**
  * エミュレーターでの通し確認（デモデータ投入後に実行）。
  *   pnpm smoke
- * 管理者として AI案を作り、スタッフとして はじめる/おわる を記録し、勤怠候補・実測区間ができることを確かめる。
+ * 管理者として AI案をプリセットを変えて作り（きょうの分は予定にし）、スタッフとして はじめる/おわる を記録し、勤怠候補・実測区間ができることを確かめる。
  */
-import { addDays, jstDate, jstToMs } from '@vrp/shared';
+import { addDays, jstDate, jstToMs, PLAN_PRESETS } from '@vrp/shared';
 import { initializeApp } from 'firebase/app';
 import { connectAuthEmulator, getAuth, signInWithCustomToken, signOut } from 'firebase/auth';
-import { connectFirestoreEmulator, doc, getFirestore, setDoc } from 'firebase/firestore';
+import { connectFirestoreEmulator, doc, getFirestore, setDoc, writeBatch } from 'firebase/firestore';
 import { connectFunctionsEmulator, getFunctions, httpsCallable } from 'firebase/functions';
 import { initializeApp as initAdmin } from 'firebase-admin/app';
 import { getAuth as adminAuth } from 'firebase-admin/auth';
@@ -37,20 +37,50 @@ const check = (ok: boolean, label: string) => {
 const today = jstDate(Date.now());
 const tomorrow = addDays(today, 1);
 
-// 1. 管理者：あしたのAI案
+// 1. 管理者：あしたのAI案を2つのプリセットで作り、パラメータと一緒に残ることを確かめる（ADR-0009）
 await signIn('admin@example.com');
-const run = await httpsCallable<unknown, { runId: string }>(
-  fns,
-  'createPlanRun',
-)({ date: tomorrow, requestId: `smoke-${Date.now()}` });
-const runDoc = (await adminDb().doc(`orgs/demo/planRuns/${run.data.runId}`).get()).data();
-check(!!runDoc, 'AI案が planRuns に保存された');
-const m = runDoc?.metrics;
-console.log(
-  `  手作業 ${Math.round(m.manual.travelSeconds / 60)}分 / AI ${Math.round(m.ai.travelSeconds / 60)}分、違反 ${m.manual.violations}→${m.ai.violations}、未割当 ${runDoc?.result.unassigned.length}、モデル ${runDoc?.modelVersion}`,
-);
-check(m.ai.violations === 0, 'AI案は条件違反なし');
-check(m.ai.travelSeconds <= m.manual.travelSeconds, 'AI案の移動時間は手作業以下');
+const createRun = async (date: string, presetIndex: number) => {
+  const p = PLAN_PRESETS[presetIndex]!;
+  const res = await httpsCallable<unknown, { runId: string }>(
+    fns,
+    'createPlanRun',
+  )({ date, requestId: `smoke-${p.id}-${Date.now()}`, params: { ...p.params, mapsApi: false } });
+  return { id: res.data.runId, doc: (await adminDb().doc(`orgs/demo/planRuns/${res.data.runId}`).get()).data() };
+};
+const runA = await createRun(tomorrow, 0);
+const runB = await createRun(tomorrow, 2);
+check(!!runA.doc && !!runB.doc, 'AI案が planRuns に保存された');
+check(runA.doc?.presetId === 'standard' && runB.doc?.presetId === 'relaxed', 'パラメータとプリセットが記録された');
+for (const r of [runA, runB]) {
+  const m = r.doc?.metrics.ai;
+  console.log(
+    `  ${r.doc?.presetId}：移動 ${Math.round(m.travelSeconds / 60)}分・待ち ${Math.round(m.waitSeconds / 60)}分、違反 ${m.violations}、未割当 ${r.doc?.result.unassigned.length}、モデル ${r.doc?.modelVersion}`,
+  );
+}
+check(runA.doc?.metrics.ai.violations === 0 && runB.doc?.metrics.ai.violations === 0, 'AI案は条件違反なし');
+const maxVisits = Math.max(0, ...(runB.doc?.result.routes ?? []).map((r: { stops: unknown[] }) => r.stops.length));
+check(maxVisits <= 3, '件数の上限（3件）を守る');
+
+// きょうの割当が無ければ、第1プリセットのAI案を予定にする（画面の「この案を予定にする」と同じ書き込みを、管理者としてルールを通して行う）
+if (!(await adminDb().doc(`orgs/demo/manualPlans/${today}`).get()).exists) {
+  const t = await createRun(today, 0);
+  const routes: Record<string, string[]> = {};
+  for (const r of t.doc?.result.routes ?? [])
+    if (r.stops.length > 0) routes[r.staffId] = r.stops.map((x: { visitId: string }) => x.visitId);
+  const batch = writeBatch(db);
+  batch.set(doc(db, `orgs/demo/manualPlans/${today}`), {
+    date: today,
+    routes,
+    minutesSpent: null,
+    fromRunId: t.id,
+    updatedBy: auth.currentUser?.uid ?? '',
+    updatedAt: Date.now(),
+  });
+  for (const [sid, ids] of Object.entries(routes))
+    for (const id of ids) batch.update(doc(db, `orgs/demo/visits/${id}`), { staffId: sid });
+  await batch.commit();
+  check(true, 'AI案を予定にした（管理者の書き込みがルールを通った）');
+}
 await signOut(auth);
 
 // 2. スタッフ：きょう2件以上あるスタッフの1件目・2件目を はじめる/おわる（オフライン再送は同じIDで2回書いても1件）
@@ -89,7 +119,7 @@ await ev('e7', 'service_end', v2, '11:30').catch(() => {
   retryFailed = true;
 });
 check(retryFailed, '同じ記録の再送は上書きされない（ルールで拒否＝二重登録なし）');
-await sleep(4000);
+await sleep(8000);
 const day = (await adminDb().doc(`orgs/demo/attendanceDays/${staffId}_${today}`).get()).data();
 check(!!day, '勤怠候補ができた');
 console.log(

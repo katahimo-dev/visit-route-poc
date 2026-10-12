@@ -43,7 +43,7 @@ export type PredictedMatrix = {
   estimateSeconds: number[][];
   /** 区間ごとに地図APIで測ったか（キャッシュ含む）。近傍の区間だけを測り、残りは概算を補正して埋める（ADR-0004） */
   measured: boolean[][];
-  /** 実際に地図API（Google Routes）の値を使ったか。使うかどうかは事業所の設定 useMapsApi（既定 true） */
+  /** 実際に地図API（Google Routes）の値を使ったか。使うかどうかは引数か事業所の設定 useMapsApi（既定 true） */
   mapsApi: boolean;
 };
 
@@ -58,9 +58,11 @@ export async function predictMatrix(
   date: string,
   departAtMs: number,
   model?: TravelModel,
+  /** 地図APIを使うか（AI案のパラメータ。省略は事業所の設定 useMapsApi） */
+  useMapsApi?: boolean,
 ): Promise<PredictedMatrix> {
   const m = model ?? (await currentModel(orgId));
-  const useMaps = (await orgDoc(orgId).get()).get('useMapsApi') !== false;
+  const useMaps = useMapsApi ?? (await orgDoc(orgId).get()).get('useMapsApi') !== false;
   const base = await baseMatrix(orgId, points, mode, departAtMs, useMaps);
   // 実際に地図APIの値（キャッシュ含む）を使ったか。設定が on でもキーが無ければ概算になる
   const measured = base.map((row, i) => row.map((l, j) => i !== j && l.source === 'routes_api'));

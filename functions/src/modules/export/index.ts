@@ -26,6 +26,8 @@ type PlanRunDoc = {
   solverVersion: string;
   computeMillis: number;
   manualMinutesSpent: number | null;
+  /** 予定がAI案を採用したものなら、その AI案の ID（ADR-0009） */
+  manualFromRunId?: string | null;
   metrics: {
     manual: { travelSeconds: number; meters: number; waitSeconds: number; violations: number; fareYen: number };
     ai: { travelSeconds: number; meters: number; waitSeconds: number; violations: number; fareYen: number };
@@ -116,10 +118,12 @@ export const exportStudyData = onCall({ region: REGION, timeoutSeconds: 120 }, a
       range<AttendanceDay>(col(orgId, 'attendanceDays')),
       range<VisitEvent>(col(orgId, 'events')),
     ]);
-    // 同じ日に複数回作ったときは最後の実行を使う
+    // 同じ日に複数回作ったときは最後の実行を使う。
+    // 予定がAI案を採用したものだった実行は、手作業案との比較にならないので出さない（ADR-0009）
     const lastRun = new Map<string, PlanRunDoc & { createdAt?: number }>();
     for (const d of runs.docs) {
       const r = d.data() as PlanRunDoc & { createdAt?: number };
+      if (r.manualFromRunId) continue;
       const prev = lastRun.get(r.date);
       if (!prev || (r.createdAt ?? 0) > (prev.createdAt ?? 0)) lastRun.set(r.date, r);
     }

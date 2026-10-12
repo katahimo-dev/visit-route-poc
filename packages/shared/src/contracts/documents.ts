@@ -102,6 +102,8 @@ export const manualPlanSchema = z.object({
   routes: z.record(z.string(), z.array(z.string())),
   /** ルート作成にかかった分数（管理者の申告。KPI） */
   minutesSpent: z.number().int().min(0).max(1440).nullable(),
+  /** AI案の画面で「予定にする」を押したときの元の AI案（planRuns の ID）。手で直して保存すると消える */
+  fromRunId: z.string().optional(),
   updatedBy: z.string(),
   updatedAt: z.number(),
 });

@@ -119,7 +119,7 @@ flowchart LR
 
 ### org（事業所・スタッフ・訪問先）
 - 責務：事業所の設定（業種・呼び方・最適化モード `order_only | assign_and_order`・交通費単価・ジオフェンス半径）、スタッフと訪問先のマスタ、ユーザー招待とロール付与、住所→緯度経度の変換と訂正、CSV取込。
-- 持つデータ（持ち主）：事業所設定（`orgs/{orgId}` 本体。運営者が書き、管理者は地図APIを使うかどうか `useMapsApi` だけを切り替えられる）、`staff`（氏名・性別・自宅位置・移動手段・基本の勤務曜日と時間・uid）、`availability`（スタッフ×日付の稼働時間帯の上書き。ADR-0008。スタッフは自分の分を当日以降だけ書ける）、`clients`（表示名・住所・位置・性別希望・メモ）、`clientPrivate`（NGスタッフ。管理者だけが読む）、`geocodeCache`（住所変換の結果、30日）、`analysisIds`（仮名ID対応表。運営者のみ読める）。業務関数だけが使う最上位のコレクション：`loginCodes`（ログインコードのハッシュ・期限・試行回数）、`mail`（送信待ちのメール。拡張機能 Trigger Email が送る）。スタッフが読めるスタッフ文書は自分の分だけ（ADR-0006）
+- 持つデータ（持ち主）：事業所設定（`orgs/{orgId}` 本体。運営者が書き、管理者は地図APIを使うかどうか `useMapsApi` だけを切り替えられる。AI案の画面で移動時間の求め方を変えると切り替わり、AI案のパラメータの既定と実測区間の予測に使う）、`staff`（氏名・性別・自宅位置・移動手段・基本の勤務曜日と時間・uid）、`availability`（スタッフ×日付の稼働時間帯の上書き。ADR-0008。スタッフは自分の分を当日以降だけ書ける）、`clients`（表示名・住所・位置・性別希望・メモ）、`clientPrivate`（NGスタッフ。管理者だけが読む）、`geocodeCache`（住所変換の結果、30日）、`analysisIds`（仮名ID対応表。運営者のみ読める）。業務関数だけが使う最上位のコレクション：`loginCodes`（ログインコードのハッシュ・期限・試行回数）、`mail`（送信待ちのメール。拡張機能 Trigger Email が送る）。スタッフが読めるスタッフ文書は自分の分だけ（ADR-0006）
 - 提供するAPI：`inviteMember`、`geocodeAddress`、`importMasterCsv`（Callable）。マスタの通常の編集は画面から直接（ルールで admin のみ）。トリガー `onStaffUpdated`（休止・付け替えで古いアカウントのクレームを外し、ログインを切る）。ログイン `requestLoginCode`・`verifyLoginCode`（未ログインで呼べる）、スケジュール関数 `revokeInactiveSessions`（毎晩、使っていないアカウントのログインを切る）、デモ環境だけ `demoStaffList`・`demoSignIn`（ADR-0007）。
 - 依存するもの：Firebase Auth（カスタムクレーム）、Google Geocoding API。
 - 配置：`functions/src/modules/org/`、`web/src/features/admin/master/`
@@ -134,7 +134,7 @@ flowchart LR
 ### schedule（予定・手作業案）
 - 責務：繰り返し予定（契約：曜日・時間）から日々の訪問を作る、1日の訪問の登録・変更・キャンセル、**手作業の割当（manual plan）**の保存。回る順番は開始時刻の順で、手では並べ替えない（PRD R3）。スタッフにはその日の決定済みの順番を見せる。
 - 持つデータ（持ち主）：`recurringVisits`（契約の曜日・時間）、`visits`（日付・訪問先・時間の約束 fixed または window・開始幅・所要時間・必要条件・現在の担当）、`manualPlans`（日付ごと。スタッフ別の訪問ID列＝開始時刻の順、作成にかかった分数）
-- 提供するAPI：`generateDayVisits(date)`（Callable、繰り返し予定から展開。同じ日を再実行しても重複しない）。それ以外の編集は画面から直接（ルールで admin のみ）。スタッフ画面は planning の `decidedPlans` があればそれを、なければ `manualPlans` を表示する。
+- 提供するAPI：`generateDayVisits(date)`（Callable、繰り返し予定から展開。同じ日を再実行しても重複しない）。それ以外の編集は画面から直接（ルールで admin のみ）。planning の AI案の画面の「この案を予定にする」も、予定画面の保存と同じ形で `manualPlans`（`fromRunId` に元の AI案）と `visits.staffId`（AI案に入った訪問だけ）を書く（持ち主の例外。ADR-0009）。スタッフ画面は planning の `decidedPlans` があればそれを、なければ `manualPlans` を表示する。
 - 依存するもの：org（スタッフ・訪問先・稼働時間帯）。
 - 配置：`functions/src/modules/schedule/`、`web/src/features/admin/schedule/`
 - 完了の条件：
@@ -143,7 +143,7 @@ flowchart LR
   - [ ] 決定済みの順番がない日は、手作業案をスタッフに見せる（1回目の実証）
 
 ### travel-time（移動時間予測AI）
-- 責務：区間（出発地→到着地・移動手段・時間帯）の**基準移動時間**を地図APIで取り、実測から作った補正で**予測移動時間**を返す。地図APIに聞くのは各地点の近傍10地点との区間だけで、残りは直線距離の概算を実測で補正して埋める（ADR-0004）。実測区間の収集と、補正モデルの学習・版管理。事業所の設定 `useMapsApi` が false なら地図APIを呼ばず、すべて直線距離の概算にする（AI案に、どちらを使ったかを残す）。
+- 責務：区間（出発地→到着地・移動手段・時間帯）の**基準移動時間**を地図APIで取り、実測から作った補正で**予測移動時間**を返す。地図APIに聞くのは各地点の近傍10地点との区間だけで、残りは直線距離の概算を実測で補正して埋める（ADR-0004）。実測区間の収集と、補正モデルの学習・版管理。事業所の設定 `useMapsApi`（AI案ではパラメータ `mapsApi` が優先。ADR-0009）が false なら地図APIを呼ばず、すべて直線距離の概算にする（AI案に、どちらを使ったかを残す）。
 - 持つデータ（持ち主）：`legCache`（基準値、30日。キーは区間×移動手段×時間帯。ルートなしも記録）、`travelModels`（補正係数表＝時間帯×曜日区分×移動手段×距離帯→倍率、学習に使った件数）、`legActuals`（実測区間＝前の退出→次の到着、予測値・基準値・モデル版・OSRMの値・直線距離つき）
 - 提供するAPI：内部関数 `predictMatrix(points, mode, departBand) → {seconds[][], meters[][], estimateSeconds[][]（同じ区間の直線距離の概算）, modelVersion, mapsApi（実際に地図APIを使ったか）}`（planning から呼ぶ）、`trainModel()`（Callable、運営者のみ。α は係数表、改で1回目の実データから再学習）。
 - 依存するもの：Google Routes API（Compute Route Matrix）、経路エンジン（OSRM。実測区間の比較値だけ。予測には使わない）、field（実測の到着・退出）。
@@ -168,9 +168,9 @@ flowchart LR
   - [ ] 守れない訪問に原因（`time_window` / `shift` / `gender` / `ng_staff` / `unreachable`）が付く
 
 ### planning（AI案の生成・比較・決定）
-- 責務：その日の訪問・スタッフ・予測行列を集めて optimizer を呼び、**AI案**として保存。手作業案とAI案を同じ予測行列で再計算して比較（移動時間・距離・交通費・待ち時間・条件違反）。管理者の手直しと決定、理由の記録。前夜の自動生成とおすすめ通知（改）。
-- 持つデータ（持ち主）：`planRuns`（入力のスナップショット・モデル版・ソルバー版・結果＝AI案・計算時間・表示用の時刻と区間＝手作業案とAI案を同じ行列で計算したもの。地図APIを使ったときは同じ区間の概算の値も）、`planRunLocks`（requestId ごとの実行の鍵。二重実行の防止と、1時間20回の上限の数え上げ）、`comparisons`（日付×実行ごと）、`decidedPlans`（日付ごと。決定案・決定者・理由・元にした案）、`recommendations`（日付×スタッフ。通知と返答）
-- 提供するAPI：`createPlanRun(date)`、`comparePlans(date, runId)`、`decidePlan(date, base, edits, reason)`、`respondRecommendation(id, answer)`（Callable）。スケジュール関数 `nightlyPlan`（毎晩、翌日分。1回目は通知しない）。
+- 責務：その日の訪問・スタッフ・予測行列を集めて、**パラメータ**（待ち時間の重み・訪問のあいだの余裕・1人の件数の上限・移動時間の求め方。プリセット3種。ADR-0009）で optimizer を呼び、**AI案**としてパラメータと組で保存。同じ日のAI案どうしを並べて比較し、選んだ案を予定にする（その日のAI案が無ければ第1プリセットで自動で作り、割当が無ければ予定にする）。手作業案があれば同じ予測行列で再計算して比較（移動時間・距離・交通費・待ち時間・条件違反）。管理者の手直しと決定、理由の記録。前夜の自動生成とおすすめ通知（改）。
+- 持つデータ（持ち主）：`planRuns`（パラメータ・プリセット・入力のスナップショット・モデル版・ソルバー版・結果＝AI案・計算時間・表示用の時刻と区間＝手作業案とAI案を同じ行列で計算したもの。地図APIを使ったときは同じ区間の概算の値も）、`planRunLocks`（requestId ごとの実行の鍵。二重実行の防止と、1時間20回の上限の数え上げ）、`comparisons`（日付×実行ごと）、`decidedPlans`（日付ごと。決定案・決定者・理由・元にした案）、`recommendations`（日付×スタッフ。通知と返答）
+- 提供するAPI：`createPlanRun(date, params)`、`comparePlans(date, runId)`、`decidePlan(date, base, edits, reason)`、`respondRecommendation(id, answer)`（Callable）。スケジュール関数 `nightlyPlan`（毎晩、翌日分。1回目は通知しない）。
 - 依存するもの：schedule、travel-time、optimizer、org（スタッフの勤務時間はその日の稼働時間帯。ADR-0008）、FCM。
 - 配置：`functions/src/modules/planning/`、`web/src/features/admin/planning/`
 - 完了の条件：

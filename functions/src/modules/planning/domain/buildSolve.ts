@@ -6,6 +6,7 @@ import {
   type EvalStaff,
   type EvalVisit,
   type Org,
+  type PlanParams,
   type Slot,
   type SolveRequest,
   type Staff,
@@ -28,6 +29,8 @@ export type Entities = {
   manualRoutes: Record<string, string[]>;
   /** その日の稼働時間帯の上書き（staffId → 時間帯。ADR-0008）。無いスタッフは基本の曜日と時間 */
   availability: Map<string, { slots: Slot[] }>;
+  /** AI案のパラメータのうち、最適化の制約になるもの（ADR-0009）。省略は制約なし */
+  params?: Pick<PlanParams, 'minGapMinutes' | 'maxVisitsPerStaff'>;
 };
 
 export type Prepared = {
@@ -52,6 +55,8 @@ export function prepare(e: Entities, date: string): Prepared {
   const assigned = new Set(Object.keys(e.manualRoutes).filter((k) => (e.manualRoutes[k] ?? []).length > 0));
   for (const v of e.visits) if (v.staffId) assigned.add(v.staffId);
 
+  const maxVisits = e.params?.maxVisitsPerStaff ?? null;
+  const minGap = e.params?.minGapMinutes ?? 0;
   const staffIn: EvalStaff[] = [];
   const staffReq: SolveRequest['staff'] = [];
   for (const s of e.staff) {
@@ -87,7 +92,7 @@ export function prepare(e: Entities, date: string): Prepared {
       shiftStart,
       shiftEnd,
       ...(breaks.length > 0 ? { breaks } : {}),
-      ...(shift ? {} : { maxVisits: 0 }),
+      ...(!shift ? { maxVisits: 0 } : maxVisits !== null ? { maxVisits } : {}),
     });
   }
   const staffIds = new Set(staffIn.map((s) => s.staffId));
@@ -124,6 +129,7 @@ export function prepare(e: Entities, date: string): Prepared {
       ...(current && staffIds.has(current) ? { currentStaffId: current } : {}),
       ...(c.requiredGender ? { requiredGender: c.requiredGender } : {}),
       ...(c.ngStaffIds.length ? { ngStaffIds: c.ngStaffIds } : {}),
+      ...(minGap > 0 ? { minGapBeforeMinutes: minGap } : {}),
     });
   }
   return {

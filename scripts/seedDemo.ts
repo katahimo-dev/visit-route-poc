@@ -5,12 +5,12 @@
  * ログインコードはエミュレーターの関数ログ（http://localhost:4000/logs）に表示される。
  * 実証用のプロジェクトに入れるとき（デモ期間）：SEED_PROJECT=<プロジェクトID> pnpm seed
  *   事業所 demo にだけ書く。デモの印の無い事業所 demo（実データ）があれば止まる。片付けは scripts/endDemo.ts
- * 予定は実行日から SEED_UNTIL（既定 2026-11-30）まで毎日入る（土日も営業）。日ごとに少しずつ変える。
- * 入れ直すと、実行日以降の訪問・手作業案・AI案は作り直す。スタッフの記録がある日と、過去の記録・勤怠には触れない。
+ * 訪問は実行日から SEED_UNTIL（既定 2026-11-30）まで毎日入る（土日も営業）。日ごとに少しずつ変える。
+ * 担当（手作業案）は入れない。AI案の画面を開くと、その日の第1プリセットのAI案を作り、予定にする（ADR-0009）。
+ * 入れ直すと、実行日以降の訪問・予定の割当・AI案は作り直す。スタッフの記録がある日と、過去の記録・勤怠には触れない。
  */
 import {
   addDays,
-  availabilityOf,
   type Client,
   type ClientPrivate,
   DEFAULT_TERMS,
@@ -23,7 +23,6 @@ import {
   type Staff,
   type Visit,
   weekday,
-  withinSlots,
 } from '@vrp/shared';
 import { initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
@@ -363,13 +362,6 @@ function visitsOf(date: string, n: number): (Visit & { id: string })[] {
     .sort((a, b) => a.earliestStart.localeCompare(b.earliestStart));
 }
 
-/** 手作業の割り当てで見込む移動時間（分）。実際より短く見積もりがち */
-const MANUAL_TRAVEL_MIN = 30;
-
-/**
- * 手作業らしい割り当て：時刻の早い訪問から、担当の慣れ（場所によらない順番）で空いている人に入れる。
- * 性別の希望・NG・勤務時間は守るが、近さは見ないので遠回りになる
- */
 /**
  * 日ごとの稼働時間帯の上書き（同じ日なら毎回同じ。ADR-0008）。
  * 市役所 まち子は5日に1回の時間休、長町 小太郎は7日に1回の休み、消防 まもるは隔週の土曜に休日出勤、
@@ -391,37 +383,6 @@ function overridesOf(date: string, n: number): Record<string, { slots: Slot[]; b
   if (dow === 6 && n % 14 < 7) out.s4 = { slots: [{ start: '09:00', end: '15:00' }], byStaff: false };
   if (weekdayOn('s7') && n % 4 === 1) out.s7 = { slots: [{ start: '11:00', end: '16:30' }], byStaff: true };
   return out;
-}
-
-function manualRoutesOf(
-  date: string,
-  n: number,
-  visits: (Visit & { id: string })[],
-  overrides: Record<string, { slots: Slot[] }>,
-): Record<string, string[]> {
-  const slotsOf = new Map(Object.entries(staff).map(([id, s]) => [id, availabilityOf(s, date, overrides[id]).slots]));
-  const working = Object.entries(staff).filter(([id]) => (slotsOf.get(id)?.length ?? 0) > 0);
-  const freeAt = new Map(working.map(([id]) => [id, hhmmToMinutes(slotsOf.get(id)?.[0]?.start ?? '00:00')]));
-  const routes: Record<string, string[]> = {};
-  for (const [k, v] of visits.entries()) {
-    const c = clients[v.clientId];
-    for (let j = 0; j < working.length; j++) {
-      const [sid, s] = working[(k * 3 + n + j) % working.length] as [string, Staff];
-      const slots = slotsOf.get(sid) ?? [];
-      if (c?.requiredGender && c.requiredGender !== s.gender) continue;
-      if (c?.ngStaffIds.includes(sid)) continue;
-      const free = freeAt.get(sid) ?? 0;
-      const start = Math.max(
-        hhmmToMinutes(v.earliestStart),
-        free + ((routes[sid]?.length ?? 0) > 0 ? MANUAL_TRAVEL_MIN : 0),
-      );
-      if (start > hhmmToMinutes(v.latestStart) || !withinSlots(slots, start, start + v.durationMinutes)) continue;
-      freeAt.set(sid, start + v.durationMinutes);
-      routes[sid] = [...(routes[sid] ?? []), v.id];
-      break;
-    }
-  }
-  return routes;
 }
 
 // 事業所の文書を先に書く（途中で止まっても、endDemo が事業所を見つけて片付けられるように）
@@ -447,12 +408,12 @@ for (const name of ['visits', 'manualPlans', 'planRuns']) {
 const oldAvail = await db.collection(`orgs/${orgId}/availability`).where('date', '>=', first).get();
 for (const d of oldAvail.docs) if (d.get('updatedBy') === 'seed' && !recorded.has(d.get('date'))) writer.delete(d.ref);
 await writer.close();
-// 画面で変えた稼働時間帯（残したもの）。手作業の割り当てでも、その日の時間帯として使う
-const kept = new Map<string, Record<string, { slots: Slot[] }>>();
+// 画面で変えた稼働時間帯（残したもの）。seed の上書きで消さない
+const kept = new Map<string, Record<string, true>>();
 for (const d of oldAvail.docs) {
   if (d.get('updatedBy') === 'seed' && !recorded.has(d.get('date'))) continue;
   const byStaff = kept.get(d.get('date')) ?? {};
-  byStaff[d.get('staffId')] = { slots: d.get('slots') };
+  byStaff[d.get('staffId')] = true;
   kept.set(d.get('date'), byStaff);
 }
 
@@ -475,17 +436,8 @@ for (const date of targets) {
       updatedAt: Date.now(),
     });
   }
-  const routes = manualRoutesOf(date, n, visits, { ...seeded, ...userMade });
-  const ownerOf = new Map(Object.entries(routes).flatMap(([s, ids]) => ids.map((id) => [id, s] as const)));
-  for (const { id, ...v } of visits)
-    batch.set(db.doc(`orgs/${orgId}/visits/${id}`), { ...v, staffId: ownerOf.get(id) ?? null });
-  batch.set(db.doc(`orgs/${orgId}/manualPlans/${date}`), {
-    date,
-    routes,
-    minutesSpent: isWeekend(date) ? 15 : 40,
-    updatedBy: 'seed',
-    updatedAt: Date.now(),
-  });
+  // 担当は入れない（AI案の画面を開くと第1プリセットで作り、予定にする。ADR-0009）
+  for (const { id, ...v } of visits) batch.set(db.doc(`orgs/${orgId}/visits/${id}`), v);
   await batch.commit();
   total += visits.length;
 }
