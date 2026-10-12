@@ -173,6 +173,8 @@ async function run(
     baseSecondsJson: JSON.stringify(matrix.baseSeconds),
     manualRoutes,
     manualMinutesSpent: manual?.minutesSpent ?? null,
+    // 予定がAI案を採用したものなら、その AI案の ID（このときの metrics.manual は手作業案ではない。ADR-0009）
+    manualFromRunId: manual?.fromRunId ?? null,
     result,
     metrics,
     views,

@@ -6,7 +6,7 @@
 import { addDays, jstDate, jstToMs, PLAN_PRESETS } from '@vrp/shared';
 import { initializeApp } from 'firebase/app';
 import { connectAuthEmulator, getAuth, signInWithCustomToken, signOut } from 'firebase/auth';
-import { connectFirestoreEmulator, doc, getFirestore, setDoc } from 'firebase/firestore';
+import { connectFirestoreEmulator, doc, getFirestore, setDoc, writeBatch } from 'firebase/firestore';
 import { connectFunctionsEmulator, getFunctions, httpsCallable } from 'firebase/functions';
 import { initializeApp as initAdmin } from 'firebase-admin/app';
 import { getAuth as adminAuth } from 'firebase-admin/auth';
@@ -61,24 +61,25 @@ check(runA.doc?.metrics.ai.violations === 0 && runB.doc?.metrics.ai.violations =
 const maxVisits = Math.max(0, ...(runB.doc?.result.routes ?? []).map((r: { stops: unknown[] }) => r.stops.length));
 check(maxVisits <= 3, '件数の上限（3件）を守る');
 
-// きょうの割当が無ければ、第1プリセットのAI案を予定にする（画面の「この案を予定にする」と同じ書き込み）
+// きょうの割当が無ければ、第1プリセットのAI案を予定にする（画面の「この案を予定にする」と同じ書き込みを、管理者としてルールを通して行う）
 if (!(await adminDb().doc(`orgs/demo/manualPlans/${today}`).get()).exists) {
   const t = await createRun(today, 0);
   const routes: Record<string, string[]> = {};
   for (const r of t.doc?.result.routes ?? [])
     if (r.stops.length > 0) routes[r.staffId] = r.stops.map((x: { visitId: string }) => x.visitId);
-  const batch = adminDb().batch();
-  batch.set(adminDb().doc(`orgs/demo/manualPlans/${today}`), {
+  const batch = writeBatch(db);
+  batch.set(doc(db, `orgs/demo/manualPlans/${today}`), {
     date: today,
     routes,
     minutesSpent: null,
     fromRunId: t.id,
-    updatedBy: 'smoke',
+    updatedBy: auth.currentUser?.uid ?? '',
     updatedAt: Date.now(),
   });
   for (const [sid, ids] of Object.entries(routes))
-    for (const id of ids) batch.update(adminDb().doc(`orgs/demo/visits/${id}`), { staffId: sid });
+    for (const id of ids) batch.update(doc(db, `orgs/demo/visits/${id}`), { staffId: sid });
   await batch.commit();
+  check(true, 'AI案を予定にした（管理者の書き込みがルールを通った）');
 }
 await signOut(auth);
 
@@ -118,7 +119,7 @@ await ev('e7', 'service_end', v2, '11:30').catch(() => {
   retryFailed = true;
 });
 check(retryFailed, '同じ記録の再送は上書きされない（ルールで拒否＝二重登録なし）');
-await sleep(4000);
+await sleep(8000);
 const day = (await adminDb().doc(`orgs/demo/attendanceDays/${staffId}_${today}`).get()).data();
 check(!!day, '勤怠候補ができた');
 console.log(

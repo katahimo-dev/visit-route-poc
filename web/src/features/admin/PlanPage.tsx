@@ -1,6 +1,7 @@
 import {
   type Client,
   DEFAULT_PLAN_PARAMS,
+  jstDate,
   type ManualPlan,
   manualPlanSchema,
   minutesToHhmm,
@@ -8,6 +9,7 @@ import {
   type PlanMetrics,
   type PlanParams,
   type PlanPresetId,
+  planParamsSchema,
   presetIdOf,
   type RouteView,
   type SolveResponse,
@@ -16,7 +18,7 @@ import {
   type UnassignedReason,
   type Visit,
 } from '@vrp/shared';
-import { doc, getDoc, where, writeBatch } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, query, updateDoc, where, writeBatch } from 'firebase/firestore';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { type MapLine, type MapPoint, RouteMap } from '../../components/RouteMap';
 import { useToast } from '../../components/Toast';
@@ -91,7 +93,7 @@ function paramsText(p: PlanParams | undefined): string {
 }
 
 export default function PlanPage() {
-  const { orgId, terms, isOperator } = useAdmin();
+  const { orgId, org, terms, isOperator } = useAdmin();
   const session = useSession();
   const toast = useToast();
   const [date, setDate] = useState(tomorrow);
@@ -100,7 +102,13 @@ export default function PlanPage() {
   const staffQ = useOrgCollection<Staff>(orgId, 'staff');
   const clientsQ = useOrgCollection<Client>(orgId, 'clients');
   const planDoc = useOrgDoc<ManualPlan>(orgId, 'manualPlans', date);
+  // 移動時間の求め方の既定は事業所の設定 useMapsApi（実測区間の予測も同じ設定を使う）
+  const orgMaps = org ? org.useMapsApi !== false : null;
   const [params, setParams] = useState<PlanParams>(DEFAULT_PLAN_PARAMS);
+  useEffect(() => {
+    if (orgMaps !== null) setParams((p) => ({ ...p, mapsApi: orgMaps }));
+  }, [orgMaps]);
+  const paramsCheck = planParamsSchema.safeParse(params);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pickA, setPickA] = useState<string | null>(null);
@@ -152,10 +160,11 @@ export default function PlanPage() {
       });
       const batch = writeBatch(db);
       batch.set(doc(db, 'orgs', orgId, 'manualPlans', run.date), data);
+      // AI案に入った訪問だけ担当を書く（AI案の後に足した訪問・割り当てられなかった訪問の担当は今のまま）
       for (const v of visits) {
-        if (v.cancelled) continue;
-        const next = owner.get(v.id) ?? null;
-        if ((v.staffId ?? null) !== next) batch.update(doc(db, 'orgs', orgId, 'visits', v.id), { staffId: next });
+        const next = owner.get(v.id);
+        if (v.cancelled || !next) continue;
+        if (v.staffId !== next) batch.update(doc(db, 'orgs', orgId, 'visits', v.id), { staffId: next });
       }
       await batch.commit();
     },
@@ -178,8 +187,11 @@ export default function PlanPage() {
           toast('AI案を作成しました');
           return;
         }
-        // 自動で作った案は、その日の割当がまだ何も無ければ予定にする（スタッフの画面に出る）
-        const visits = visitsQ.rows ?? [];
+        // 自動で作った案は、その日の割当がまだ何も無ければ予定にする（スタッフの画面に出る）。
+        // 画面の購読は日付の切り替え直後に前の日の値が残ることがあるので、その日の訪問を読み直す
+        const visits = (
+          await getDocs(query(collection(db, 'orgs', orgId, 'visits'), where('date', '==', date)))
+        ).docs.map((d) => ({ id: d.id, ...(d.data() as Visit) }));
         const plan = await getDoc(doc(db, 'orgs', orgId, 'manualPlans', date));
         const run = await getDoc(doc(db, 'orgs', orgId, 'planRuns', runId));
         const unassigned = !plan.exists() && visits.every((v) => v.cancelled || !v.staffId);
@@ -195,17 +207,26 @@ export default function PlanPage() {
         setBusy(false);
       }
     },
-    [date, orgId, isOperator, toast, visitsQ.rows, adopt],
+    [date, orgId, isOperator, toast, adopt],
   );
 
-  // その日のAI案が無く、訪問があれば、第1プリセットで自動で作る
+  // きょう以降で、その日のAI案が無く訪問があれば、第1プリセットで自動で作る。
+  // 順番だけのモード（order_only）は担当が要るので作らない。購読が前の日の値のままなら待つ
+  const autoReady =
+    !busy &&
+    org !== null &&
+    org.optimizeMode === 'assign_and_order' &&
+    date >= jstDate(Date.now()) &&
+    runsQ.rows !== null &&
+    visitsQ.rows !== null &&
+    runsQ.rows.every((r) => r.date === date) &&
+    visitsQ.rows.every((v) => v.date === date);
+  const autoNeeded = autoReady && runsQ.rows?.length === 0 && (visitsQ.rows?.some((v) => !v.cancelled) ?? false);
   useEffect(() => {
-    if (busy || runsQ.rows === null || visitsQ.rows === null) return;
-    if (runsQ.rows.length > 0 || !visitsQ.rows.some((v) => !v.cancelled)) return;
-    if (autoTried.current.has(date)) return;
+    if (!autoNeeded || orgMaps === null || autoTried.current.has(date)) return;
     autoTried.current.add(date);
-    void create(DEFAULT_PLAN_PARAMS, true);
-  }, [busy, runsQ.rows, visitsQ.rows, date, create]);
+    void create({ ...DEFAULT_PLAN_PARAMS, mapsApi: orgMaps }, true);
+  }, [autoNeeded, orgMaps, date, create]);
 
   const changeDate = (d: string) => {
     setDate(d);
@@ -214,7 +235,17 @@ export default function PlanPage() {
   };
 
   const adoptClick = async (run: WithId<PlanRun>) => {
-    if (planDoc && !window.confirm('この日の予定の割当を、この AI案で置き換えます。よろしいですか？')) return;
+    const past = run.date < jstDate(Date.now());
+    const hasPlan = (await getDoc(doc(db, 'orgs', orgId, 'manualPlans', run.date))).exists();
+    if (
+      (past || hasPlan) &&
+      !window.confirm(
+        past
+          ? '過ぎた日の予定の割当を、この AI案で置き換えます（記録・勤怠とずれることがあります）。よろしいですか？'
+          : 'この日の予定の割当を、この AI案で置き換えます。よろしいですか？',
+      )
+    )
+      return;
     setBusy(true);
     setError(null);
     try {
@@ -304,6 +335,15 @@ export default function PlanPage() {
   };
 
   const presetNow = presetIdOf(params);
+  /** 移動時間の求め方を変えると、事業所の設定（実測区間の予測・次の自動作成の既定）も変える */
+  const setMaps = async (v: boolean) => {
+    setParams({ ...params, mapsApi: v });
+    try {
+      await updateDoc(doc(db, 'orgs', orgId), { useMapsApi: v });
+    } catch (e) {
+      setError(formError(e));
+    }
+  };
   const setNum = (k: 'waitWeight' | 'minGapMinutes', v: string) => {
     const n = Number(v);
     if (v !== '' && Number.isFinite(n)) setParams({ ...params, [k]: n });
@@ -388,7 +428,7 @@ export default function PlanPage() {
                 type="button"
                 aria-pressed={params.mapsApi}
                 className={params.mapsApi ? 'is-on' : ''}
-                onClick={() => setParams({ ...params, mapsApi: true })}
+                onClick={() => setMaps(true)}
               >
                 Google の地図API
               </button>
@@ -396,7 +436,7 @@ export default function PlanPage() {
                 type="button"
                 aria-pressed={!params.mapsApi}
                 className={params.mapsApi ? '' : 'is-on'}
-                onClick={() => setParams({ ...params, mapsApi: false })}
+                onClick={() => setMaps(false)}
               >
                 直線距離からの概算（無料）
               </button>
@@ -415,9 +455,19 @@ export default function PlanPage() {
             </div>
           </div>
           <div className="row">
-            <button type="button" className="btn btn-primary" disabled={busy} onClick={() => create(params, false)}>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={busy || !paramsCheck.success}
+              onClick={() => create(params, false)}
+            >
               {busy ? '作成中…（数十秒かかります）' : 'このパラメータでAI案を作成'}
             </button>
+            {!paramsCheck.success && (
+              <span className="error">
+                待ちの重みは0〜5、余裕は0〜60分の整数、件数の上限は1〜30の整数（空欄はなし）で入力してください
+              </span>
+            )}
           </div>
         </div>
         {error && <p className="error">{error}</p>}
